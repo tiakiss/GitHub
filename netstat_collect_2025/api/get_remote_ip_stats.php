@@ -13,10 +13,11 @@ try {
     $toDate = isset($_GET['to_date']) ? $_GET['to_date'] : null;
     $serverName = isset($_GET['server_name']) ? $_GET['server_name'] : null;
     
-    // クエリの基本部分
+    // クエリの基本部分 - サーバー名も含めて取得するように変更
     $sql = "
         SELECT 
-            remote_ip, 
+            remote_ip,
+            servername, 
             COUNT(*) as count 
         FROM 
             netstat_date 
@@ -42,18 +43,40 @@ try {
         $params[':server_name'] = $serverName;
     }
     
-    // グループ化と並べ替え
-    $sql .= " GROUP BY remote_ip ORDER BY count DESC LIMIT 20";
+    // グループ化と並べ替え - remote_ipとservernameの両方でグループ化
+    $sql .= " GROUP BY remote_ip, servername ORDER BY COUNT(*) DESC";
     
     // クエリの準備と実行
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
+    // トップ20のリモートIPを特定する
+    $ipCounts = [];
+    
+    foreach ($results as $row) {
+        if (!isset($ipCounts[$row['remote_ip']])) {
+            $ipCounts[$row['remote_ip']] = 0;
+        }
+        $ipCounts[$row['remote_ip']] += $row['count'];
+    }
+    
+    // リモートIPを接続数の降順でソート
+    arsort($ipCounts);
+    
+    // トップ20のリモートIPを取得
+    $topIps = array_slice(array_keys($ipCounts), 0, 20);
+    
+    // 結果をトップIPのみに絞り込む
+    $filteredResults = array_filter($results, function($row) use ($topIps) {
+        return in_array($row['remote_ip'], $topIps);
+    });
+    
     // JSONで結果を返す
     echo json_encode([
         'success' => true,
-        'data' => $results,
+        'data' => array_values($filteredResults), // インデックスをリセット
+        'top_ips' => $topIps,
         'filters' => [
             'from_date' => $fromDate,
             'to_date' => $toDate,
