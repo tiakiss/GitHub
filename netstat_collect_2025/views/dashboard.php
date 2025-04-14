@@ -129,11 +129,8 @@
                         <input type="checkbox" id="server-all" checked>
                         <label for="server-all" style="margin-left: 5px; margin-bottom: 0;">すべて（色分け表示）</label>
                     </div>
-                    <div style="display: flex; align-items: center; margin-bottom: 5px;">
-                        <input type="checkbox" id="server-nsv5" value="nsv5.s-graphi.jp">
-                        <label for="server-nsv5" style="margin-left: 5px; margin-bottom: 0;">nsv5.s-graphi.jp</label>
-                    </div>
-                    <!-- 他のサーバーは動的に追加 -->
+                    <!-- サーバーリストは JavaScript で動的に生成されます -->
+                    <div id="server-loading" style="color: #666; padding: 5px;">読み込み中...</div>
                 </div>
             </div>
             
@@ -195,8 +192,6 @@
                     fromDate = new Date(today);
                     fromDate.setDate(fromDate.getDate() - 1);
                     toDate = new Date(today);
-                    // 昨日の終わり（今日の始まりの直前）
-                    toDate.setHours(0, 0, 0, 0); 
                     toDate.setMilliseconds(-1);
                     break;
                 case 'last7days':
@@ -229,25 +224,21 @@
             
             // サーバー選択を取得
             const allServersSelected = document.getElementById('server-all').checked;
-            let selectedServers = []; // 複数サーバー対応に変更
-
-            if (allServersSelected) {
-                // 「すべて」が選択された場合は、すべてのサーバーを対象にする
-                // APIからサーバー一覧を取得している場合は、それを使用
-                const serverCheckboxes = document.querySelectorAll('input[id^="server-"]:not(#server-all)');
-                serverCheckboxes.forEach(checkbox => {
-                    if (checkbox.value) {
-                        selectedServers.push(checkbox.value);
-                    }
-                });
-            } else {
-                // 個別選択の場合
-                const serverCheckboxes = document.querySelectorAll('input[id^="server-"]:not(#server-all):checked');
-                serverCheckboxes.forEach(checkbox => {
-                    if (checkbox.value) {
-                        selectedServers.push(checkbox.value);
-                    }
-                });
+            let selectedServer = null;
+            
+            if (!allServersSelected) {
+                // 「すべて」が選択されていない場合の処理を改善
+                const serverCheckboxes = document.querySelectorAll('input.server-checkbox:checked');
+                if (serverCheckboxes.length === 1) {
+                    // 1つのサーバーが選択されている場合
+                    selectedServer = serverCheckboxes[0].value;
+                    console.log('選択されたサーバー:', selectedServer);
+                } else if (serverCheckboxes.length > 1) {
+                    // 現在のAPIは複数サーバー選択に対応していないため、
+                    // 複数選択されている場合は「すべて」として扱う
+                    console.log('複数サーバーが選択されています - APIは複数選択に対応していないため「すべて」として扱います');
+                    // selectedServer は nullのまま
+                }
             }
             
             // クエリパラメータの構築
@@ -258,16 +249,8 @@
             if (toDate) {
                 params.append('to_date', toDate.toISOString().split('T')[0]);
             }
-
-            // 複数サーバー対応
-            if (selectedServers.length > 0) {
-                // バックエンドAPIがserver_namesのような複数値パラメータに対応している場合
-                selectedServers.forEach(server => {
-                    params.append('server_names[]', server);
-                });
-            } else {
-                // 少なくとも1つのサーバーを選択（デフォルトの挙動）
-                params.append('all_servers', 'true');
+            if (selectedServer) {
+                params.append('server_name', selectedServer);
             }
             
             // APIからデータを取得
@@ -277,7 +260,10 @@
             if (!response.ok) {
                 throw new Error(`API request failed: ${response.statusText}`);
             }
-            return await response.json();
+            
+            const data = await response.json();
+            console.log(`API Response for ${endpoint}:`, data);
+            return data;
         }
         
         // 接続状態のデータを取得してグラフを描画
@@ -967,35 +953,48 @@
         }
 
         // サーバー選択のチェックボックス制御
-        function handleServerCheckboxChange() {
+        function handleServerCheckboxChange(event) {
             const allServerCheckbox = document.getElementById('server-all');
-            const serverCheckboxes = document.querySelectorAll('input[id^="server-"]:not(#server-all)');
+            const serverCheckboxes = document.querySelectorAll('input.server-checkbox');
             
-            // いずれかのサーバーが選択されていたら「すべて」のチェックを外す
-            if (this.checked && this.id !== 'server-all') {
-                allServerCheckbox.checked = false;
-            }
-            
-            // 「すべて」が選択されたら他のチェックを外して無効化
-            if (this.id === 'server-all' && this.checked) {
-                serverCheckboxes.forEach(checkbox => {
-                    checkbox.checked = false;
-                    checkbox.disabled = true;
-                });
-            } else if (this.id === 'server-all' && !this.checked) {
-                // 「すべて」のチェックが外れたら他のチェックボックスを有効化
-                serverCheckboxes.forEach(checkbox => {
-                    checkbox.disabled = false;
-                });
-            }
-            
-            // すべての個別サーバーのチェックが外れていたら「すべて」にチェック
-            if (this.id !== 'server-all') {
+            // 「すべて」チェックボックスの変更イベントの場合
+            if (this === allServerCheckbox) {
+                if (this.checked) {
+                    // 「すべて」がチェックされたら他のチェックを外して無効化
+                    serverCheckboxes.forEach(checkbox => {
+                        checkbox.checked = false;
+                        checkbox.disabled = true;
+                    });
+                } else {
+                    // 「すべて」のチェックが外れたら他のチェックボックスを有効化
+                    serverCheckboxes.forEach(checkbox => {
+                        checkbox.disabled = false;
+                    });
+                }
+            } 
+            // 個別サーバーのチェックボックスの変更イベントの場合
+            else {
+                // いずれかのサーバーが選択されていたら「すべて」のチェックを外す
+                if (this.checked) {
+                    allServerCheckbox.checked = false;
+                }
+                
+                // すべてのサーバーチェックボックスがオフになったら「すべて」を自動選択
                 const anyChecked = Array.from(serverCheckboxes).some(cb => cb.checked);
                 if (!anyChecked) {
                     allServerCheckbox.checked = true;
                     serverCheckboxes.forEach(cb => cb.disabled = true);
                 }
+            }
+            
+            // デバッグログ - 現在選択されているサーバー
+            if (allServerCheckbox.checked) {
+                console.log('現在の選択: すべてのサーバー');
+            } else {
+                const selected = Array.from(serverCheckboxes)
+                    .filter(cb => cb.checked)
+                    .map(cb => cb.value);
+                console.log('現在の選択:', selected.length > 0 ? selected : '選択なし（すべて）');
             }
         }
 
