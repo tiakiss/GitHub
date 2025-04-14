@@ -13,10 +13,11 @@ try {
     $toDate = isset($_GET['to_date']) ? $_GET['to_date'] : null;
     $serverName = isset($_GET['server_name']) ? $_GET['server_name'] : null;
     
-    // クエリの基本部分
+    // クエリの基本部分 - サーバー名も含めて取得するように変更
     $sql = "
         SELECT 
             port, 
+            servername,
             COUNT(*) as count 
         FROM 
             netstat_date 
@@ -42,18 +43,41 @@ try {
         $params[':server_name'] = $serverName;
     }
     
-    // グループ化と並べ替え
-    $sql .= " GROUP BY port ORDER BY count DESC LIMIT 10";
+    // グループ化と並べ替え - portとservernameの両方でグループ化
+    $sql .= " GROUP BY port, servername ORDER BY COUNT(*) DESC";
     
     // クエリの準備と実行
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
+    // トップ10のポートを特定する
+    $topPorts = [];
+    $portCounts = [];
+    
+    foreach ($results as $row) {
+        if (!isset($portCounts[$row['port']])) {
+            $portCounts[$row['port']] = 0;
+        }
+        $portCounts[$row['port']] += $row['count'];
+    }
+    
+    // ポートを接続数の降順でソート
+    arsort($portCounts);
+    
+    // トップ10のポートを取得
+    $topPorts = array_slice(array_keys($portCounts), 0, 10);
+    
+    // 結果をトップポートのみに絞り込む
+    $filteredResults = array_filter($results, function($row) use ($topPorts) {
+        return in_array($row['port'], $topPorts);
+    });
+    
     // JSONで結果を返す
     echo json_encode([
         'success' => true,
-        'data' => $results,
+        'data' => array_values($filteredResults),  // インデックスをリセット
+        'top_ports' => $topPorts,
         'filters' => [
             'from_date' => $fromDate,
             'to_date' => $toDate,

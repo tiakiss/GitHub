@@ -123,17 +123,17 @@
             </div>
             
             <div class="filter-group">
-                <label>サーバー名（複数選択可）</label>
+                <label>サーバー表示</label>
                 <div style="max-height: 120px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 8px;">
                     <div style="display: flex; align-items: center; margin-bottom: 5px;">
                         <input type="checkbox" id="server-all" checked>
-                        <label for="server-all" style="margin-left: 5px; margin-bottom: 0;">すべて</label>
+                        <label for="server-all" style="margin-left: 5px; margin-bottom: 0;">すべて（色分け表示）</label>
                     </div>
                     <div style="display: flex; align-items: center; margin-bottom: 5px;">
                         <input type="checkbox" id="server-nsv5" value="nsv5.s-graphi.jp">
                         <label for="server-nsv5" style="margin-left: 5px; margin-bottom: 0;">nsv5.s-graphi.jp</label>
                     </div>
-                    <!-- 必要に応じて他のサーバーを追加 -->
+                    <!-- 他のサーバーは動的に追加 -->
                 </div>
             </div>
             
@@ -229,13 +229,25 @@
             
             // サーバー選択を取得
             const allServersSelected = document.getElementById('server-all').checked;
-            let selectedServer = null;
-            
-            if (!allServersSelected) {
+            let selectedServers = []; // 複数サーバー対応に変更
+
+            if (allServersSelected) {
+                // 「すべて」が選択された場合は、すべてのサーバーを対象にする
+                // APIからサーバー一覧を取得している場合は、それを使用
+                const serverCheckboxes = document.querySelectorAll('input[id^="server-"]:not(#server-all)');
+                serverCheckboxes.forEach(checkbox => {
+                    if (checkbox.value) {
+                        selectedServers.push(checkbox.value);
+                    }
+                });
+            } else {
+                // 個別選択の場合
                 const serverCheckboxes = document.querySelectorAll('input[id^="server-"]:not(#server-all):checked');
-                if (serverCheckboxes.length === 1) {
-                    selectedServer = serverCheckboxes[0].value;
-                }
+                serverCheckboxes.forEach(checkbox => {
+                    if (checkbox.value) {
+                        selectedServers.push(checkbox.value);
+                    }
+                });
             }
             
             // クエリパラメータの構築
@@ -246,8 +258,16 @@
             if (toDate) {
                 params.append('to_date', toDate.toISOString().split('T')[0]);
             }
-            if (selectedServer) {
-                params.append('server_name', selectedServer);
+
+            // 複数サーバー対応
+            if (selectedServers.length > 0) {
+                // バックエンドAPIがserver_namesのような複数値パラメータに対応している場合
+                selectedServers.forEach(server => {
+                    params.append('server_names[]', server);
+                });
+            } else {
+                // 少なくとも1つのサーバーを選択（デフォルトの挙動）
+                params.append('all_servers', 'true');
             }
             
             // APIからデータを取得
