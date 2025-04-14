@@ -448,37 +448,61 @@
             }
         }
         
+        // サーバー表示用の色を取得する共通関数
+        function getServerColors(index) {
+            const colors = [
+                'rgba(255, 99, 132, 0.7)',   // 赤
+                'rgba(54, 162, 235, 0.7)',   // 青
+                'rgba(255, 206, 86, 0.7)',   // 黄
+                'rgba(75, 192, 192, 0.7)',   // 緑
+                'rgba(153, 102, 255, 0.7)',  // 紫
+                'rgba(255, 159, 64, 0.7)',   // オレンジ
+                'rgba(199, 199, 199, 0.7)',  // グレー
+                'rgba(83, 102, 255, 0.7)',   // 青紫
+                'rgba(255, 99, 255, 0.7)',   // ピンク
+                'rgba(159, 159, 64, 0.7)',   // オリーブ
+            ];
+            
+            const color = colors[index % colors.length];
+            const borderColor = color.replace('0.7', '1');
+            
+            return {
+                backgroundColor: color,
+                borderColor: borderColor
+            };
+        }
+
         // ポート別接続数のグラフを描画
         async function loadPortChart() {
             const chartContainer = document.getElementById('port-chart').parentNode; // 親要素を取得
             const canvasElement = document.getElementById('port-chart'); // Canvas要素を取得
 
             try {
-                console.log('ポート別グラフ読み込み開始'); // 追加: 開始ログ
+                console.log('ポート別グラフ読み込み開始');
 
-                 // 既存のメッセージ表示があればクリア
+                // 既存のメッセージ表示があればクリア
                 const existingMessage = chartContainer.querySelector('div[style*="color:"]');
                 if (existingMessage) {
                     chartContainer.removeChild(existingMessage);
                 }
-                 // ローディング表示があれば削除
+                // ローディング表示があれば削除
                 const loadingDiv = chartContainer.querySelector('div:not([style*="color:"])');
                 if (loadingDiv && loadingDiv.textContent.includes('読み込み中')) {
-                     chartContainer.removeChild(loadingDiv);
+                    chartContainer.removeChild(loadingDiv);
                 }
                 // Canvasを再表示
                 canvasElement.style.display = 'block';
 
                 // フィルター付きでデータを取得
                 const result = await fetchDataWithFilters('get_port_stats.php');
-                console.log('取得データ (port):', result); // ログ追加
+                console.log('取得データ (port):', result);
 
                 if (!result.success) {
                     throw new Error(result.error || 'データ取得エラー');
                 }
                 
                 const data = result.data;
-                console.log('グラフ用データ (port):', data); // ログ追加
+                console.log('グラフ用データ (port):', data);
                 
                 // 既存のチャートを破棄
                 if (window.portChart instanceof Chart) {
@@ -491,98 +515,111 @@
                     // Canvasを非表示にし、メッセージを表示
                     canvasElement.style.display = 'none';
                     const messageDiv = document.createElement('div');
-                    messageDiv.style.color = 'orange'; // オレンジ色に変更
+                    messageDiv.style.color = 'orange';
                     messageDiv.style.padding = '20px';
                     messageDiv.style.textAlign = 'center';
                     messageDiv.textContent = '選択した期間のデータがありません';
-                     // 既存のメッセージがなければ追加
+                    // 既存のメッセージがなければ追加
                     if (!chartContainer.querySelector('div[style*="color: orange"]')) {
-                         chartContainer.appendChild(messageDiv);
+                        chartContainer.appendChild(messageDiv);
                     }
                     console.log('データが空のためグラフ描画をスキップ (port)');
                     return;
                 }
 
-                // --- データがある場合の描画処理 ---
-                // Canvasを表示
+                // --- データがある場合の処理 ---
                 canvasElement.style.display = 'block';
 
-                // 表示数を制限（上位10件）
-                const displayLimit = 10;
-                const displayData = data.slice(0, displayLimit);
+                // ポート別・サーバー別にデータを整理
+                const topPorts = result.top_ports || [];
+                // トップポートがない場合は、データから抽出
+                if (topPorts.length === 0) {
+                    const portCounts = {};
+                    data.forEach(item => {
+                        if (!portCounts[item.port]) {
+                            portCounts[item.port] = 0;
+                        }
+                        portCounts[item.port] += parseInt(item.count);
+                    });
+                    // 降順にソートして上位10件を取得
+                    const sortedPorts = Object.keys(portCounts).sort((a, b) => portCounts[b] - portCounts[a]);
+                    topPorts.push(...sortedPorts.slice(0, 10));
+                }
+
+                // サーバー一覧を取得
+                const servers = [...new Set(data.map(item => item.servername))];
+                
+                // サーバーごとにデータセットを作成
+                const datasets = servers.map((server, index) => {
+                    const serverColor = getServerColors(index);
+                    // 各ポートのこのサーバーでの接続数を取得
+                    const serverData = topPorts.map(port => {
+                        const match = data.find(item => item.port === port && item.servername === server);
+                        return match ? parseInt(match.count) : 0;
+                    });
+                    
+                    return {
+                        label: server,
+                        data: serverData,
+                        backgroundColor: serverColor.backgroundColor,
+                        borderColor: serverColor.borderColor,
+                        borderWidth: 1
+                    };
+                });
 
                 // グラフの描画
                 const ctx = canvasElement.getContext('2d');
                 
-                // 明示的にラベルと値を抽出 (displayDataから)
-                // APIの応答に合わせて `item.local_port` または `item.port` を使用してください
-                const labels = displayData.map(item => `${item.local_port || item.port || '不明'}`);
-                const values = displayData.map(item => parseInt(item.count) || 0); // parseIntを追加
-
-                console.log('ラベル (port):', labels); // ログ追加
-                console.log('値 (port):', values);   // ログ追加
-                
                 window.portChart = new Chart(ctx, {
                     type: 'bar',
                     data: {
-                        labels: labels, // 抽出したラベルを使用
-                        datasets: [{
-                            label: '接続数',
-                            data: values, // 抽出した値を使用
-                            backgroundColor: 'rgba(75, 192, 192, 0.7)',
-                            borderColor: 'rgba(75, 192, 192, 1)',
-                            borderWidth: 1
-                        }]
+                        labels: topPorts.map(port => `${port}`),
+                        datasets: datasets
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                         indexAxis: 'y', // 横棒グラフを維持
+                        indexAxis: 'y', // 横棒グラフ
                         scales: {
-                             x: { // 横棒グラフなので X 軸
-                                beginAtZero: true
+                            x: {
+                                beginAtZero: true,
+                                stacked: true
+                            },
+                            y: {
+                                stacked: true
                             }
                         },
-                         plugins: {
+                        plugins: {
                             tooltip: {
                                 callbacks: {
-                                     title: function(context) {
-                                         // ツールチップのタイトルにポート番号を表示
-                                         return `Port ${context[0].label}`;
-                                    },
-                                    label: function(context) {
-                                        // ツールチップの本文に接続数を表示
-                                        let label = context.dataset.label || '';
-                                        if (label) {
-                                            label += ': ';
-                                        }
-                                        if (context.parsed.x !== null) {
-                                            label += context.parsed.x;
-                                        }
-                                        return label;
+                                    title: function(context) {
+                                        return `Port ${context[0].label}`;
                                     }
                                 }
+                            },
+                            legend: {
+                                position: 'right'
                             }
                         }
                     }
                 });
-                console.log('ポート別グラフ描画完了'); // 追加: 完了ログ
+                console.log('ポート別グラフ描画完了');
                 
             } catch (error) {
-                console.error('ポート別グラフ描画エラー:', error); // 修正: エラーログの改善
+                console.error('ポート別グラフ描画エラー:', error);
                 // 既存のチャートがあれば破棄
                 if (window.portChart instanceof Chart) {
                     window.portChart.destroy();
                     window.portChart = null;
                 }
-                 // Canvasを非表示にし、エラーメッセージを表示
+                // Canvasを非表示にし、エラーメッセージを表示
                 canvasElement.style.display = 'none';
-                 // 既存のメッセージ/ローディング表示をクリア
+                // 既存のメッセージ/ローディング表示をクリア
                 const existingMessages = chartContainer.querySelectorAll('div[style*="color:"]');
                 existingMessages.forEach(msg => chartContainer.removeChild(msg));
                 const loadingDiv = chartContainer.querySelector('div:not([style*="color:"])');
-                 if (loadingDiv && loadingDiv.textContent.includes('読み込み中')) {
-                     chartContainer.removeChild(loadingDiv);
+                if (loadingDiv && loadingDiv.textContent.includes('読み込み中')) {
+                    chartContainer.removeChild(loadingDiv);
                 }
                 const errorDiv = document.createElement('div');
                 errorDiv.style.color = 'red';
@@ -595,39 +632,126 @@
         
         // トップリモートIPのグラフを描画
         async function loadRemoteIpChart() {
+            const chartContainer = document.getElementById('remote-ip-chart').parentNode; // 親要素を取得
+            const canvasElement = document.getElementById('remote-ip-chart'); // Canvas要素を取得
+
             try {
+                console.log('リモートIPグラフ読み込み開始');
+
+                // 既存のメッセージ表示があればクリア
+                const existingMessage = chartContainer.querySelector('div[style*="color:"]');
+                if (existingMessage) {
+                    chartContainer.removeChild(existingMessage);
+                }
+                // ローディング表示があれば削除
+                const loadingDiv = chartContainer.querySelector('div:not([style*="color:"])');
+                if (loadingDiv && loadingDiv.textContent.includes('読み込み中')) {
+                    chartContainer.removeChild(loadingDiv);
+                }
+                // Canvasを再表示
+                canvasElement.style.display = 'block';
+
                 // フィルター付きでデータを取得
                 const result = await fetchDataWithFilters('get_remote_ip_stats.php');
-                
+                console.log('取得データ (remote_ip):', result);
+
                 if (!result.success) {
                     throw new Error(result.error || 'データ取得エラー');
                 }
                 
                 const data = result.data;
+                console.log('グラフ用データ (remote_ip):', data);
                 
-                // 表示数を制限（多すぎるとグラフが見づらくなるため）
-                const displayLimit = 10;
-                const displayData = data.slice(0, displayLimit);
-                
-                // グラフの描画
-                const ctx = document.getElementById('remote-ip-chart').getContext('2d');
-                
-                // 既存のチャートを破棄（再描画時）
+                // 既存のチャートを破棄
                 if (window.remoteIpChart instanceof Chart) {
                     window.remoteIpChart.destroy();
+                    window.remoteIpChart = null;
                 }
+
+                // データが空の場合の処理
+                if (!data || data.length === 0) {
+                    // Canvasを非表示にし、メッセージを表示
+                    canvasElement.style.display = 'none';
+                    const messageDiv = document.createElement('div');
+                    messageDiv.style.color = 'orange';
+                    messageDiv.style.padding = '20px';
+                    messageDiv.style.textAlign = 'center';
+                    messageDiv.textContent = '選択した期間のデータがありません';
+                    // 既存のメッセージがなければ追加
+                    if (!chartContainer.querySelector('div[style*="color: orange"]')) {
+                        chartContainer.appendChild(messageDiv);
+                    }
+                    console.log('データが空のためグラフ描画をスキップ (remote_ip)');
+                    return;
+                }
+
+                // --- データがある場合の処理 ---
+                canvasElement.style.display = 'block';
+
+                // リモートIP別・サーバー別にデータを整理
+                const topIps = result.top_ips || [];
+                // トップIPがない場合は、データから抽出
+                if (topIps.length === 0) {
+                    const ipCounts = {};
+                    data.forEach(item => {
+                        if (!ipCounts[item.remote_ip]) {
+                            ipCounts[item.remote_ip] = 0;
+                        }
+                        ipCounts[item.remote_ip] += parseInt(item.count);
+                    });
+                    // 降順にソートして上位10件を取得（表示数制限）
+                    const sortedIps = Object.keys(ipCounts).sort((a, b) => ipCounts[b] - ipCounts[a]);
+                    topIps.push(...sortedIps.slice(0, 10));
+                } else {
+                    // 表示数を制限（多すぎるとグラフが見づらくなるため）
+                    topIps.splice(10);
+                }
+
+                // サーバー一覧を取得
+                const servers = [...new Set(data.map(item => item.servername))];
+                
+                // 色の配列を定義（サーバーの数だけ必要）
+                const colors = [
+                    'rgba(255, 99, 132, 0.7)',   // 赤
+                    'rgba(54, 162, 235, 0.7)',   // 青
+                    'rgba(255, 206, 86, 0.7)',   // 黄
+                    'rgba(75, 192, 192, 0.7)',   // 緑
+                    'rgba(153, 102, 255, 0.7)',  // 紫
+                    'rgba(255, 159, 64, 0.7)',   // オレンジ
+                    'rgba(199, 199, 199, 0.7)',  // グレー
+                    'rgba(83, 102, 255, 0.7)',   // 青紫
+                    'rgba(255, 99, 255, 0.7)',   // ピンク
+                    'rgba(159, 159, 64, 0.7)',   // オリーブ
+                ];
+                
+                // ボーダーカラーも設定（同じ色の濃いバージョン）
+                const borderColors = colors.map(color => color.replace('0.7', '1'));
+                
+                // サーバーごとにデータセットを作成
+                const datasets = servers.map((server, index) => {
+                    // 各IPのこのサーバーでの接続数を取得
+                    const serverData = topIps.map(ip => {
+                        const match = data.find(item => item.remote_ip === ip && item.servername === server);
+                        return match ? parseInt(match.count) : 0;
+                    });
+                    
+                    return {
+                        label: server,
+                        data: serverData,
+                        backgroundColor: colors[index % colors.length],
+                        borderColor: borderColors[index % borderColors.length],
+                        borderWidth: 1
+                    };
+                });
+
+                // グラフの描画
+                const ctx = canvasElement.getContext('2d');
                 
                 window.remoteIpChart = new Chart(ctx, {
                     type: 'bar',
                     data: {
-                        labels: displayData.map(item => item.remote_ip),
-                        datasets: [{
-                            label: '接続数',
-                            data: displayData.map(item => item.count),
-                            backgroundColor: 'rgba(153, 102, 255, 0.7)',
-                            borderColor: 'rgba(153, 102, 255, 1)',
-                            borderWidth: 1
-                        }]
+                        labels: topIps,
+                        datasets: datasets
                     },
                     options: {
                         responsive: true,
@@ -635,17 +759,51 @@
                         indexAxis: 'y', // 横棒グラフ
                         scales: {
                             x: {
-                                beginAtZero: true
+                                beginAtZero: true,
+                                stacked: true
+                            },
+                            y: {
+                                stacked: true
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    title: function(context) {
+                                        return `IP: ${context[0].label}`;
+                                    }
+                                }
+                            },
+                            legend: {
+                                position: 'right'
                             }
                         }
                     }
                 });
+                console.log('リモートIPグラフ描画完了');
                 
             } catch (error) {
                 console.error('リモートIPグラフ描画エラー:', error);
-                 const chartContainer = document.getElementById('remote-ip-chart').parentNode;
-                 chartContainer.innerHTML = 
-                    `<div style="color: red; padding: 20px; text-align: center;">グラフ表示エラー<br><small>${error.message}</small></div>`;
+                // 既存のチャートがあれば破棄
+                if (window.remoteIpChart instanceof Chart) {
+                    window.remoteIpChart.destroy();
+                    window.remoteIpChart = null;
+                }
+                // Canvasを非表示にし、エラーメッセージを表示
+                canvasElement.style.display = 'none';
+                // 既存のメッセージ/ローディング表示をクリア
+                const existingMessages = chartContainer.querySelectorAll('div[style*="color:"]');
+                existingMessages.forEach(msg => chartContainer.removeChild(msg));
+                const loadingDiv = chartContainer.querySelector('div:not([style*="color:"])');
+                if (loadingDiv && loadingDiv.textContent.includes('読み込み中')) {
+                    chartContainer.removeChild(loadingDiv);
+                }
+                const errorDiv = document.createElement('div');
+                errorDiv.style.color = 'red';
+                errorDiv.style.padding = '20px';
+                errorDiv.style.textAlign = 'center';
+                errorDiv.innerHTML = `グラフ表示エラー<br><small>${error.message}</small>`;
+                chartContainer.appendChild(errorDiv);
             }
         }
 
