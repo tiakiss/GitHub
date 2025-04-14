@@ -173,97 +173,93 @@
     <script>
         // フィルター条件を含むAPIの呼び出し関数
         async function fetchDataWithFilters(endpoint) {
-            // 日付範囲を取得
-            const dateRange = document.getElementById('date-range').value;
-            let fromDate = null;
-            let toDate = null;
-            
-            // 日付範囲に応じてフィルター値を設定
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            switch (dateRange) {
-                case 'today':
-                    fromDate = today;
-                    toDate = new Date(today);
-                    toDate.setHours(23, 59, 59, 999);
-                    break;
-                case 'yesterday':
-                    fromDate = new Date(today);
-                    fromDate.setDate(fromDate.getDate() - 1);
-                    toDate = new Date(today);
-                    toDate.setMilliseconds(-1);
-                    break;
-                case 'last7days':
-                    fromDate = new Date(today);
-                    fromDate.setDate(fromDate.getDate() - 7);
-                    toDate = new Date(today);
-                    toDate.setHours(23, 59, 59, 999);
-                    break;
-                case 'last30days':
-                    fromDate = new Date(today);
-                    fromDate.setDate(fromDate.getDate() - 30);
-                    toDate = new Date(today);
-                    toDate.setHours(23, 59, 59, 999);
-                    break;
-                case 'custom':
-                    const customFrom = document.getElementById('custom-from').value;
-                    const customTo = document.getElementById('custom-to').value;
-                    
-                    if (customFrom) {
-                        fromDate = new Date(customFrom);
-                        fromDate.setHours(0, 0, 0, 0);
-                    }
-                    
-                    if (customTo) {
-                        toDate = new Date(customTo);
+            try {
+                // 日付範囲の設定
+                const dateRange = document.getElementById('date-range').value;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                
+                let fromDate = null;
+                let toDate = null;
+                
+                switch (dateRange) {
+                    case 'today':
+                        fromDate = today;
+                        toDate = new Date(today);
                         toDate.setHours(23, 59, 59, 999);
-                    }
-                    break;
-            }
-            
-            // サーバー選択を取得
-            const allServersSelected = document.getElementById('server-all').checked;
-            let selectedServer = null;
-            
-            if (!allServersSelected) {
-                // 「すべて」が選択されていない場合の処理を改善
-                const serverCheckboxes = document.querySelectorAll('input.server-checkbox:checked');
-                if (serverCheckboxes.length === 1) {
-                    // 1つのサーバーが選択されている場合
-                    selectedServer = serverCheckboxes[0].value;
-                    console.log('選択されたサーバー:', selectedServer);
-                } else if (serverCheckboxes.length > 1) {
-                    // 現在のAPIは複数サーバー選択に対応していないため、
-                    // 複数選択されている場合は「すべて」として扱う
-                    console.log('複数サーバーが選択されています - APIは複数選択に対応していないため「すべて」として扱います');
-                    // selectedServer は nullのまま
+                        break;
+                    case 'yesterday':
+                        fromDate = new Date(today);
+                        fromDate.setDate(fromDate.getDate() - 1);
+                        toDate = new Date(today);
+                        toDate.setMilliseconds(-1);
+                        break;
+                    case 'last7days':
+                        fromDate = new Date(today);
+                        fromDate.setDate(fromDate.getDate() - 7);
+                        toDate = new Date(today);
+                        toDate.setHours(23, 59, 59, 999);
+                        break;
+                    case 'last30days':
+                        fromDate = new Date(today);
+                        fromDate.setDate(fromDate.getDate() - 30);
+                        toDate = new Date(today);
+                        toDate.setHours(23, 59, 59, 999);
+                        break;
+                    case 'custom':
+                        const customFrom = document.getElementById('custom-from').value;
+                        const customTo = document.getElementById('custom-to').value;
+                        
+                        if (customFrom) {
+                            fromDate = new Date(customFrom);
+                            fromDate.setHours(0, 0, 0, 0);
+                        }
+                        
+                        if (customTo) {
+                            toDate = new Date(customTo);
+                            toDate.setHours(23, 59, 59, 999);
+                        }
+                        break;
                 }
+                
+                // サーバー選択の設定
+                const allServersSelected = document.getElementById('server-all').checked;
+                let selectedServer = null;
+                
+                if (!allServersSelected) {
+                    const serverCheckboxes = document.querySelectorAll('input.server-checkbox:checked');
+                    if (serverCheckboxes.length === 1) {
+                        selectedServer = serverCheckboxes[0].value;
+                    }
+                }
+                
+                // クエリパラメータの構築
+                const params = new URLSearchParams();
+                if (fromDate) {
+                    params.append('from_date', fromDate.toISOString().split('T')[0]);
+                }
+                if (toDate) {
+                    params.append('to_date', toDate.toISOString().split('T')[0]);
+                }
+                if (selectedServer) {
+                    params.append('server_name', selectedServer);
+                }
+                
+                // APIリクエスト
+                const apiUrl = `api/${endpoint}?${params.toString()}`;
+                const response = await fetch(apiUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`APIリクエストエラー: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                return data;
+                
+            } catch (error) {
+                console.error(`${endpoint} データ取得エラー:`, error);
+                throw error;
             }
-            
-            // クエリパラメータの構築
-            const params = new URLSearchParams();
-            if (fromDate) {
-                params.append('from_date', fromDate.toISOString().split('T')[0]);
-            }
-            if (toDate) {
-                params.append('to_date', toDate.toISOString().split('T')[0]);
-            }
-            if (selectedServer) {
-                params.append('server_name', selectedServer);
-            }
-            
-            // APIからデータを取得
-            const apiUrl = `api/${endpoint}?${params.toString()}`;
-            console.log(`Fetching data from: ${apiUrl}`); // デバッグ用ログ
-            const response = await fetch(apiUrl);
-            if (!response.ok) {
-                throw new Error(`API request failed: ${response.statusText}`);
-            }
-            
-            const data = await response.json();
-            console.log(`API Response for ${endpoint}:`, data);
-            return data;
         }
         
         // 接続状態のデータを取得してグラフを描画
@@ -906,32 +902,69 @@
         window.portChart = null;
         window.remoteIpChart = null;
 
-        // サーバーリストを取得して表示
+        // サーバーリストを取得して表示する関数の改善版
         async function loadServerList() {
             try {
-                const response = await fetch('api/get_server_list.php');
-                const result = await response.json();
+                console.log('サーバーリストの読み込み開始');
                 
-                if (!result.success) {
-                    throw new Error(result.error || 'サーバーリスト取得エラー');
+                const container = document.querySelector('.filter-group div[style*="overflow-y: auto"]');
+                if (!container) {
+                    throw new Error('サーバーリストのコンテナが見つかりません');
                 }
                 
-                const servers = result.data;
-                const container = document.querySelector('.filter-group div[style*="overflow-y: auto"]');
+                // ローディング表示
+                const loadingDiv = document.createElement('div');
+                loadingDiv.id = 'server-loading';
+                loadingDiv.style.cssText = 'color: #666; padding: 5px;';
+                loadingDiv.textContent = 'サーバーリスト取得中...';
                 
-                // 「すべて」以外のチェックボックスをクリア
-                const existingCheckboxes = container.querySelectorAll('div:not(:first-child)');
-                existingCheckboxes.forEach(checkbox => checkbox.remove());
+                // 既存の要素をクリア
+                const existingElements = container.querySelectorAll('div:not(:first-child)');
+                existingElements.forEach(element => element.remove());
+                
+                // ローディング表示を追加
+                container.appendChild(loadingDiv);
+                
+                // APIからサーバーリストを取得
+                const response = await fetch('api/get_server_list.php');
+                if (!response.ok) {
+                    throw new Error(`HTTPエラー: ${response.status}`);
+                }
+                
+                const responseData = await response.json();
+                console.log('サーバーリストAPIの応答:', responseData);
+                
+                // ローディング表示を削除
+                loadingDiv.remove();
+                
+                if (!responseData.success) {
+                    throw new Error(responseData.error || 'サーバーリスト取得エラー');
+                }
+                
+                const servers = responseData.data;
+                if (!Array.isArray(servers) || servers.length === 0) {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.textContent = 'サーバーリストが空です';
+                    messageDiv.style.cssText = 'color: #666; padding: 5px;';
+                    container.appendChild(messageDiv);
+                    return;
+                }
                 
                 // サーバーごとにチェックボックスを追加
                 servers.forEach(server => {
+                    if (!server?.servername) {
+                        console.warn('無効なサーバー情報をスキップ:', server);
+                        return;
+                    }
+                    
                     const serverDiv = document.createElement('div');
                     serverDiv.style.cssText = 'display: flex; align-items: center; margin-bottom: 5px;';
                     
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
-                    checkbox.id = `server-${server.servername.replace(/\./g, '-')}`;
+                    checkbox.id = `server-${server.servername.replace(/[.\s]/g, '-')}`;
                     checkbox.value = server.servername;
+                    checkbox.className = 'server-checkbox';
                     checkbox.disabled = document.getElementById('server-all').checked;
                     
                     const label = document.createElement('label');
@@ -943,63 +976,51 @@
                     serverDiv.appendChild(label);
                     container.appendChild(serverDiv);
                     
-                    // チェックボックスのイベントハンドラを追加
                     checkbox.addEventListener('change', handleServerCheckboxChange);
                 });
                 
+                console.log('サーバーリスト表示完了');
+                
             } catch (error) {
                 console.error('サーバーリスト読み込みエラー:', error);
+                
+                const container = document.querySelector('.filter-group div[style*="overflow-y: auto"]');
+                if (container) {
+                    const loadingElement = document.getElementById('server-loading');
+                    if (loadingElement) {
+                        loadingElement.remove();
+                    }
+                    
+                    const errorDiv = document.createElement('div');
+                    errorDiv.textContent = `サーバーリスト取得エラー: ${error.message}`;
+                    errorDiv.style.cssText = 'color: red; padding: 5px;';
+                    container.appendChild(errorDiv);
+                }
             }
         }
 
-        // サーバー選択のチェックボックス制御
+        // サーバー選択のチェックボックス制御の改善版
         function handleServerCheckboxChange(event) {
             const allServerCheckbox = document.getElementById('server-all');
             const serverCheckboxes = document.querySelectorAll('input.server-checkbox');
             
-            // 「すべて」チェックボックスの変更イベントの場合
-            if (this === allServerCheckbox) {
-                if (this.checked) {
-                    // 「すべて」がチェックされたら他のチェックを外して無効化
-                    serverCheckboxes.forEach(checkbox => {
-                        checkbox.checked = false;
-                        checkbox.disabled = true;
-                    });
-                } else {
-                    // 「すべて」のチェックが外れたら他のチェックボックスを有効化
-                    serverCheckboxes.forEach(checkbox => {
-                        checkbox.disabled = false;
-                    });
-                }
-            } 
-            // 個別サーバーのチェックボックスの変更イベントの場合
-            else {
-                // いずれかのサーバーが選択されていたら「すべて」のチェックを外す
+            if (this.id === 'server-all') {
+                serverCheckboxes.forEach(checkbox => {
+                    checkbox.checked = false;
+                    checkbox.disabled = this.checked;
+                });
+            } else {
                 if (this.checked) {
                     allServerCheckbox.checked = false;
                 }
                 
-                // すべてのサーバーチェックボックスがオフになったら「すべて」を自動選択
                 const anyChecked = Array.from(serverCheckboxes).some(cb => cb.checked);
                 if (!anyChecked) {
                     allServerCheckbox.checked = true;
                     serverCheckboxes.forEach(cb => cb.disabled = true);
                 }
             }
-            
-            // デバッグログ - 現在選択されているサーバー
-            if (allServerCheckbox.checked) {
-                console.log('現在の選択: すべてのサーバー');
-            } else {
-                const selected = Array.from(serverCheckboxes)
-                    .filter(cb => cb.checked)
-                    .map(cb => cb.value);
-                console.log('現在の選択:', selected.length > 0 ? selected : '選択なし（すべて）');
-            }
         }
-
-        // 「すべて」チェックボックスの初期イベントハンドラ
-        document.getElementById('server-all').addEventListener('change', handleServerCheckboxChange);
 
     </script>
 </body>
