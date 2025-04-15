@@ -1,5 +1,5 @@
-// api/get_server_list.php への修正提案
 <?php
+// API修正提案
 header('Content-Type: application/json');
 
 try {
@@ -45,4 +45,3 @@ try {
         'error' => $e->getMessage()
     ]);
 }
-?>
