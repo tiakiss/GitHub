@@ -92,6 +92,50 @@
         .filter-group button:hover {
             background-color: #1a252f;
         }
+        .toggle-container {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #2c3e50;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
     </style>
 </head>
 <body>
@@ -161,7 +205,16 @@
             </div>
 
             <div class="card">
-                <div class="card-header">トップリモートIP</div>
+                <div class="card-header">
+                    トップリモートIP
+                    <div class="toggle-container" style="float: right; font-size: 14px; font-weight: normal;">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="ip-port-toggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span id="toggle-label">ポート別表示: オフ</span>
+                    </div>
+                </div>
                 <div class="card-body">
                     <canvas id="remote-ip-chart"></canvas>
                 </div>
@@ -172,7 +225,7 @@
 
     <script>
         // フィルター条件を含むAPIの呼び出し関数
-        async function fetchDataWithFilters(endpoint) {
+        async function fetchDataWithFilters(endpoint, additionalParams = {}) {
             console.log(`${endpoint} のデータ取得開始`);
             
             // 日付範囲を取得
@@ -238,9 +291,8 @@
                     selectedServer = serverCheckboxes[0].value;
                     console.log('選択されたサーバー:', selectedServer);
                 } else if (serverCheckboxes.length > 1) {
-                    // 現在のAPIは複数サーバー選択に対応していないため、
                     // 複数選択の場合は「すべて」として扱う
-                    console.log('複数サーバーが選択されています - APIは複数選択に対応していないため「すべて」として扱います');
+                    console.log('複数サーバーが選択されています - 「すべて」として扱います');
                     // selectedServer は null のまま
                 }
             }
@@ -255,6 +307,11 @@
             }
             if (selectedServer) {
                 params.append('server_name', selectedServer);
+            }
+            
+            // 追加パラメータがあれば追加
+            for (const [key, value] of Object.entries(additionalParams)) {
+                params.append(key, value);
             }
             
             // APIからデータを取得
@@ -634,11 +691,12 @@
         
         // トップリモートIPのグラフを描画
         async function loadRemoteIpChart() {
-            const chartContainer = document.getElementById('remote-ip-chart').parentNode; // 親要素を取得
-            const canvasElement = document.getElementById('remote-ip-chart'); // Canvas要素を取得
+            const chartContainer = document.getElementById('remote-ip-chart').parentNode;
+            const canvasElement = document.getElementById('remote-ip-chart');
+            const groupByPort = document.getElementById('ip-port-toggle').checked;
 
             try {
-                console.log('リモートIPグラフ読み込み開始');
+                console.log('リモートIPグラフ読み込み開始 (ポート別表示: ' + (groupByPort ? 'オン' : 'オフ') + ')');
 
                 // 既存のメッセージ表示があればクリア
                 const existingMessage = chartContainer.querySelector('div[style*="color:"]');
@@ -653,8 +711,10 @@
                 // Canvasを再表示
                 canvasElement.style.display = 'block';
 
-                // フィルター付きでデータを取得
-                const result = await fetchDataWithFilters('get_remote_ip_stats.php');
+                // フィルター付きでデータを取得 (group_by_portパラメータを追加)
+                const result = await fetchDataWithFilters('get_remote_ip_stats.php', { 
+                    group_by_port: groupByPort 
+                });
                 console.log('取得データ (remote_ip):', result);
 
                 if (!result.success) {
@@ -690,58 +750,75 @@
                 // --- データがある場合の処理 ---
                 canvasElement.style.display = 'block';
 
-                // リモートIP別・サーバー別にデータを整理
-                const topIps = result.top_ips || [];
-                // トップIPがない場合は、データから抽出
-                if (topIps.length === 0) {
-                    const ipCounts = {};
-                    data.forEach(item => {
-                        if (!ipCounts[item.remote_ip]) {
-                            ipCounts[item.remote_ip] = 0;
-                        }
-                        ipCounts[item.remote_ip] += parseInt(item.count);
-                    });
-                    // 降順にソートして上位10件を取得（表示数制限）
-                    const sortedIps = Object.keys(ipCounts).sort((a, b) => ipCounts[b] - ipCounts[a]);
-                    topIps.push(...sortedIps.slice(0, 10));
+                // リモートIP別・サーバー別にデータを整理 (ポートを含むかどうかで処理を分岐)
+                const topEntries = result.top_entries || [];
+                
+                // トップエントリがない場合は、データから抽出
+                if (topEntries.length === 0) {
+                    if (groupByPort) {
+                        // ポート別表示の場合
+                        const ipPortCounts = {};
+                        data.forEach(item => {
+                            const key = `${item.remote_ip}:${item.port}`;
+                            if (!ipPortCounts[key]) {
+                                ipPortCounts[key] = 0;
+                            }
+                            ipPortCounts[key] += parseInt(item.count);
+                        });
+                        // 降順にソートして上位10件を取得（表示数制限）
+                        const sortedEntries = Object.keys(ipPortCounts).sort((a, b) => ipPortCounts[b] - ipPortCounts[a]);
+                        topEntries.push(...sortedEntries.slice(0, 10));
+                    } else {
+                        // IP単位表示の場合（既存の処理）
+                        const ipCounts = {};
+                        data.forEach(item => {
+                            if (!ipCounts[item.remote_ip]) {
+                                ipCounts[item.remote_ip] = 0;
+                            }
+                            ipCounts[item.remote_ip] += parseInt(item.count);
+                        });
+                        // 降順にソートして上位10件を取得（表示数制限）
+                        const sortedIps = Object.keys(ipCounts).sort((a, b) => ipCounts[b] - ipCounts[a]);
+                        topEntries.push(...sortedIps.slice(0, 10));
+                    }
                 } else {
                     // 表示数を制限（多すぎるとグラフが見づらくなるため）
-                    topIps.splice(10);
+                    topEntries.splice(10);
                 }
 
                 // サーバー一覧を取得
                 const servers = [...new Set(data.map(item => item.servername))];
                 
-                // 色の配列を定義（サーバーの数だけ必要）
-                const colors = [
-                    'rgba(255, 99, 132, 0.7)',   // 赤
-                    'rgba(54, 162, 235, 0.7)',   // 青
-                    'rgba(255, 206, 86, 0.7)',   // 黄
-                    'rgba(75, 192, 192, 0.7)',   // 緑
-                    'rgba(153, 102, 255, 0.7)',  // 紫
-                    'rgba(255, 159, 64, 0.7)',   // オレンジ
-                    'rgba(199, 199, 199, 0.7)',  // グレー
-                    'rgba(83, 102, 255, 0.7)',   // 青紫
-                    'rgba(255, 99, 255, 0.7)',   // ピンク
-                    'rgba(159, 159, 64, 0.7)',   // オリーブ
-                ];
-                
-                // ボーダーカラーも設定（同じ色の濃いバージョン）
-                const borderColors = colors.map(color => color.replace('0.7', '1'));
-                
                 // サーバーごとにデータセットを作成
                 const datasets = servers.map((server, index) => {
-                    // 各IPのこのサーバーでの接続数を取得
-                    const serverData = topIps.map(ip => {
-                        const match = data.find(item => item.remote_ip === ip && item.servername === server);
-                        return match ? parseInt(match.count) : 0;
+                    const serverColor = getServerColors(index);
+                    
+                    // 各エントリのこのサーバーでの接続数を取得
+                    const serverData = topEntries.map(entry => {
+                        if (groupByPort) {
+                            // IP:ポートの形式からIPとポートを分離
+                            const [ip, port] = entry.split(':');
+                            const match = data.find(item => 
+                                item.remote_ip === ip && 
+                                item.port === port && 
+                                item.servername === server
+                            );
+                            return match ? parseInt(match.count) : 0;
+                        } else {
+                            // 従来通りIPのみで検索
+                            const match = data.find(item => 
+                                item.remote_ip === entry && 
+                                item.servername === server
+                            );
+                            return match ? parseInt(match.count) : 0;
+                        }
                     });
                     
                     return {
                         label: server,
                         data: serverData,
-                        backgroundColor: colors[index % colors.length],
-                        borderColor: borderColors[index % borderColors.length],
+                        backgroundColor: serverColor.backgroundColor,
+                        borderColor: serverColor.borderColor,
                         borderWidth: 1
                     };
                 });
@@ -752,7 +829,7 @@
                 window.remoteIpChart = new Chart(ctx, {
                     type: 'bar',
                     data: {
-                        labels: topIps,
+                        labels: topEntries,
                         datasets: datasets
                     },
                     options: {
@@ -772,7 +849,12 @@
                             tooltip: {
                                 callbacks: {
                                     title: function(context) {
-                                        return `IP: ${context[0].label}`;
+                                        if (groupByPort) {
+                                            const [ip, port] = context[0].label.split(':');
+                                            return `IP: ${ip}, ポート: ${port}`;
+                                        } else {
+                                            return `IP: ${context[0].label}`;
+                                        }
                                     }
                                 }
                             },
@@ -897,6 +979,14 @@
             
             // セレクトボックス変更時のイベントリスナー
             dateRangeSelect.addEventListener('change', toggleCustomDateInputs);
+            
+            // トグルスイッチのイベントリスナーを追加
+            document.getElementById('ip-port-toggle').addEventListener('change', function() {
+                const toggleLabel = document.getElementById('toggle-label');
+                toggleLabel.textContent = this.checked ? 'ポート別表示: オン' : 'ポート別表示: オフ';
+                // トグルが変更されたら対応するグラフを再読み込み
+                loadRemoteIpChart();
+            });
             
             // サーバーリストとグラフを読み込む
             loadServerList();

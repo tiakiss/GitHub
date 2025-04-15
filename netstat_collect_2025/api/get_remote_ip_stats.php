@@ -12,17 +12,31 @@ try {
     $fromDate = isset($_GET['from_date']) ? $_GET['from_date'] : null;
     $toDate = isset($_GET['to_date']) ? $_GET['to_date'] : null;
     $serverName = isset($_GET['server_name']) ? $_GET['server_name'] : null;
+    $groupByPort = isset($_GET['group_by_port']) ? filter_var($_GET['group_by_port'], FILTER_VALIDATE_BOOLEAN) : false;
     
-    // クエリの基本部分 - サーバー名も含めて取得するように変更
-    $sql = "
-        SELECT 
-            remote_ip,
-            servername, 
-            COUNT(*) as count 
-        FROM 
-            netstat_date 
-        WHERE 1=1
-    ";
+    // クエリの基本部分 - 新しいgroup_by_portパラメータに基づいてSELECT句とGROUP BY句を変更
+    if ($groupByPort) {
+        $sql = "
+            SELECT 
+                remote_ip,
+                port,
+                servername, 
+                COUNT(*) as count 
+            FROM 
+                netstat_date 
+            WHERE 1=1
+        ";
+    } else {
+        $sql = "
+            SELECT 
+                remote_ip,
+                servername, 
+                COUNT(*) as count 
+            FROM 
+                netstat_date 
+            WHERE 1=1
+        ";
+    }
     
     $params = [];
     
@@ -43,44 +57,76 @@ try {
         $params[':server_name'] = $serverName;
     }
     
-    // グループ化と並べ替え - remote_ipとservernameの両方でグループ化
-    $sql .= " GROUP BY remote_ip, servername ORDER BY COUNT(*) DESC";
+    // グループ化と並べ替え - group_by_portパラメータに基づいてGROUP BY句を変更
+    if ($groupByPort) {
+        $sql .= " GROUP BY remote_ip, port, servername ORDER BY COUNT(*) DESC";
+    } else {
+        $sql .= " GROUP BY remote_ip, servername ORDER BY COUNT(*) DESC";
+    }
     
     // クエリの準備と実行
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // トップ20のリモートIPを特定する
-    $ipCounts = [];
-    
-    foreach ($results as $row) {
-        if (!isset($ipCounts[$row['remote_ip']])) {
-            $ipCounts[$row['remote_ip']] = 0;
+    // トップエントリを特定する
+    if ($groupByPort) {
+        // リモートIP+ポートの組み合わせでカウント
+        $ipPortCounts = [];
+        
+        foreach ($results as $row) {
+            $key = $row['remote_ip'] . ':' . $row['port'];
+            if (!isset($ipPortCounts[$key])) {
+                $ipPortCounts[$key] = 0;
+            }
+            $ipPortCounts[$key] += $row['count'];
         }
-        $ipCounts[$row['remote_ip']] += $row['count'];
+        
+        // 接続数の降順でソート
+        arsort($ipPortCounts);
+        
+        // トップ20のリモートIP+ポートを取得
+        $topEntries = array_slice(array_keys($ipPortCounts), 0, 20);
+        
+        // 結果をトップエントリのみに絞り込む
+        $filteredResults = array_filter($results, function($row) use ($topEntries) {
+            $key = $row['remote_ip'] . ':' . $row['port'];
+            return in_array($key, $topEntries);
+        });
+    } else {
+        // 従来通りリモートIPのみでカウント
+        $ipCounts = [];
+        
+        foreach ($results as $row) {
+            if (!isset($ipCounts[$row['remote_ip']])) {
+                $ipCounts[$row['remote_ip']] = 0;
+            }
+            $ipCounts[$row['remote_ip']] += $row['count'];
+        }
+        
+        // リモートIPを接続数の降順でソート
+        arsort($ipCounts);
+        
+        // トップ20のリモートIPを取得
+        $topIps = array_slice(array_keys($ipCounts), 0, 20);
+        
+        // 結果をトップIPのみに絞り込む
+        $filteredResults = array_filter($results, function($row) use ($topIps) {
+            return in_array($row['remote_ip'], $topIps);
+        });
     }
-    
-    // リモートIPを接続数の降順でソート
-    arsort($ipCounts);
-    
-    // トップ20のリモートIPを取得
-    $topIps = array_slice(array_keys($ipCounts), 0, 20);
-    
-    // 結果をトップIPのみに絞り込む
-    $filteredResults = array_filter($results, function($row) use ($topIps) {
-        return in_array($row['remote_ip'], $topIps);
-    });
     
     // JSONで結果を返す
     echo json_encode([
         'success' => true,
         'data' => array_values($filteredResults), // インデックスをリセット
-        'top_ips' => $topIps,
+        'top_entries' => $groupByPort ? $topEntries : $topIps,
+        'group_by_port' => $groupByPort,
         'filters' => [
             'from_date' => $fromDate,
             'to_date' => $toDate,
-            'server_name' => $serverName
+            'server_name' => $serverName,
+            'group_by_port' => $groupByPort
         ]
     ]);
     
