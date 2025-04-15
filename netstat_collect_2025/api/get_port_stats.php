@@ -12,6 +12,7 @@ try {
     $fromDate = isset($_GET['from_date']) ? $_GET['from_date'] : null;
     $toDate = isset($_GET['to_date']) ? $_GET['to_date'] : null;
     $serverName = isset($_GET['server_name']) ? $_GET['server_name'] : null;
+    $filterPort = isset($_GET['filter_port']) ? $_GET['filter_port'] : null;
     
     // クエリの基本部分 - サーバー名も含めて取得するように変更
     $sql = "
@@ -41,6 +42,25 @@ try {
     if ($serverName && $serverName !== 'all') {
         $sql .= " AND servername = :server_name";
         $params[':server_name'] = $serverName;
+    }
+    
+    // ポートフィルター（複数ポート対応）
+    if ($filterPort && $filterPort !== 'all') {
+        // カンマ区切りのポートリストをチェック
+        if (strpos($filterPort, ',') !== false) {
+            $ports = explode(',', $filterPort);
+            $placeholders = [];
+            foreach ($ports as $i => $port) {
+                $paramName = ":filter_port_$i"; // アンダースコアを使用（コロンとセット）
+                $placeholders[] = $paramName;
+                $params[$paramName] = trim($port);
+            }
+            $sql .= " AND port IN (" . implode(', ', $placeholders) . ")";
+        } else {
+            // 単一ポートの場合
+            $sql .= " AND port = :filter_port";
+            $params[':filter_port'] = $filterPort;
+        }
     }
     
     // グループ化と並べ替え - portとservernameの両方でグループ化
@@ -81,7 +101,8 @@ try {
         'filters' => [
             'from_date' => $fromDate,
             'to_date' => $toDate,
-            'server_name' => $serverName
+            'server_name' => $serverName,
+            'filter_port' => $filterPort
         ]
     ]);
     
