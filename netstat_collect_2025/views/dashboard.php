@@ -243,114 +243,120 @@
 
     <script>
         // フィルター条件を含むAPIの呼び出し関数
-        async function fetchDataWithFilters(endpoint, additionalParams = {}) {
-            console.log(`${endpoint} のデータ取得開始`);
-            
-            // 日付範囲を取得
-            const dateRange = document.getElementById('date-range').value;
-            let fromDate = null;
-            let toDate = null;
-            
-            // 日付範囲に応じてフィルター値を設定
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            switch (dateRange) {
-                case 'today':
-                    fromDate = today;
-                    toDate = new Date(today);
-                    toDate.setHours(23, 59, 59, 999);
-                    break;
-                case 'yesterday':
-                    fromDate = new Date(today);
-                    fromDate.setDate(fromDate.getDate() - 1);
-                    toDate = new Date(today);
-                    toDate.setMilliseconds(-1);
-                    break;
-                case 'last7days':
-                    fromDate = new Date(today);
-                    fromDate.setDate(fromDate.getDate() - 7);
-                    toDate = new Date(today);
-                    toDate.setHours(23, 59, 59, 999);
-                    break;
-                case 'last30days':
-                    fromDate = new Date(today);
-                    fromDate.setDate(fromDate.getDate() - 30);
-                    toDate = new Date(today);
-                    toDate.setHours(23, 59, 59, 999);
-                    break;
-                case 'custom':
-                    const customFrom = document.getElementById('custom-from').value;
-                    const customTo = document.getElementById('custom-to').value;
-                    
-                    if (customFrom) {
-                        fromDate = new Date(customFrom);
-                        fromDate.setHours(0, 0, 0, 0);
-                    }
-                    
-                    if (customTo) {
-                        toDate = new Date(customTo);
-                        toDate.setHours(23, 59, 59, 999);
-                    }
-                    break;
-            }
-            
-            // サーバー選択を取得
-            const allServersSelected = document.getElementById('server-all').checked;
-            let selectedServer = null;
-            
-            if (!allServersSelected) {
-                // クラスセレクタを使用して選択されたサーバーチェックボックスを取得
-                const serverCheckboxes = document.querySelectorAll('input.server-checkbox:checked');
-                console.log('選択されたサーバーチェックボックス数:', serverCheckboxes.length);
-                
-                if (serverCheckboxes.length === 1) {
-                    // 1つのサーバーだけが選択されている場合
-                    selectedServer = serverCheckboxes[0].value;
-                    console.log('選択されたサーバー:', selectedServer);
-                } else if (serverCheckboxes.length > 1) {
-                    // 複数選択の場合は「すべて」として扱う
-                    console.log('複数サーバーが選択されています - 「すべて」として扱います');
-                    // selectedServer は null のまま
-                }
-            }
-            
-            // クエリパラメータの構築
-            const params = new URLSearchParams();
-            if (fromDate) {
-                params.append('from_date', fromDate.toISOString().split('T')[0]);
-            }
-            if (toDate) {
-                params.append('to_date', toDate.toISOString().split('T')[0]);
-            }
-            if (selectedServer) {
-                params.append('server_name', selectedServer);
-            }
-            
-            // 追加パラメータがあれば追加
-            for (const [key, value] of Object.entries(additionalParams)) {
-                params.append(key, value);
-            }
-            
-            // APIからデータを取得
-            const apiUrl = `api/${endpoint}?${params.toString()}`;
-            console.log(`Fetch URL: ${apiUrl}`);
-            
+        async function fetchDataWithFilters(endpoint, additionalParams = {}, signal = null) {
             try {
-                const response = await fetch(apiUrl);
+                console.log(`${endpoint} のデータ取得開始`);
+                
+                // 日付範囲を取得
+                const dateRange = document.getElementById('date-range').value;
+                let fromDate = null;
+                let toDate = null;
+                
+                // 日付範囲に応じてフィルター値を設定
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                
+                switch (dateRange) {
+                    case 'today':
+                        fromDate = today;
+                        toDate = new Date(today);
+                        toDate.setHours(23, 59, 59, 999);
+                        break;
+                    case 'yesterday':
+                        fromDate = new Date(today);
+                        fromDate.setDate(fromDate.getDate() - 1);
+                        toDate = new Date(today);
+                        toDate.setMilliseconds(-1);
+                        break;
+                    case 'last7days':
+                        fromDate = new Date(today);
+                        fromDate.setDate(fromDate.getDate() - 7);
+                        toDate = new Date(today);
+                        toDate.setHours(23, 59, 59, 999);
+                        break;
+                    case 'last30days':
+                        fromDate = new Date(today);
+                        fromDate.setDate(fromDate.getDate() - 30);
+                        toDate = new Date(today);
+                        toDate.setHours(23, 59, 59, 999);
+                        break;
+                    case 'custom':
+                        const customFrom = document.getElementById('custom-from').value;
+                        const customTo = document.getElementById('custom-to').value;
+                        
+                        if (customFrom) {
+                            fromDate = new Date(customFrom);
+                            fromDate.setHours(0, 0, 0, 0);
+                        }
+                        
+                        if (customTo) {
+                            toDate = new Date(customTo);
+                            toDate.setHours(23, 59, 59, 999);
+                        }
+                        break;
+                }
+                
+                // サーバー選択を取得
+                const allServersSelected = document.getElementById('server-all').checked;
+                let selectedServer = null;
+                
+                if (!allServersSelected) {
+                    const serverCheckboxes = document.querySelectorAll('input.server-checkbox:checked');
+                    if (serverCheckboxes.length === 1) {
+                        selectedServer = serverCheckboxes[0].value;
+                    }
+                }
+                
+                // クエリパラメータの構築
+                const params = new URLSearchParams();
+                if (fromDate) {
+                    params.append('from_date', fromDate.toISOString().split('T')[0]);
+                }
+                if (toDate) {
+                    params.append('to_date', toDate.toISOString().split('T')[0]);
+                }
+                if (selectedServer) {
+                    params.append('server_name', selectedServer);
+                }
+                
+                // 追加パラメータがあれば追加
+                for (const [key, value] of Object.entries(additionalParams)) {
+                    params.append(key, value);
+                }
+                
+                // APIからデータを取得
+                const apiUrl = `api/${endpoint}?${params.toString()}`;
+                console.log(`Fetch URL: ${apiUrl}`);
+                
+                const fetchOptions = {
+                    signal: signal
+                };
+                
+                const response = await fetch(apiUrl, fetchOptions);
+                
+                // レスポンスのステータスコードとステータステキストをログ出力
+                console.log(`API レスポンスステータス: ${response.status} ${response.statusText}`);
+                
                 if (!response.ok) {
+                    // エラーの場合、レスポンスボディもログに出力
+                    const errorText = await response.text();
+                    console.error(`API エラーレスポンス: ${errorText}`);
                     throw new Error(`APIリクエストエラー: ${response.status} ${response.statusText}`);
                 }
                 
-                const data = await response.json();
-                console.log(`${endpoint} の応答データ:`, data);
-                
-                // フィルター情報をログ出力
-                if (data.filters) {
-                    console.log('適用されたフィルター:', data.filters);
+                try {
+                    const data = await response.json();
+                    console.log(`${endpoint} の応答データ:`, data);
+                    
+                    if (!data.success) {
+                        throw new Error(data.error || 'APIエラー');
+                    }
+                    
+                    return data;
+                } catch (parseError) {
+                    console.error(`JSONパースエラー:`, parseError);
+                    throw new Error('レスポンスの解析に失敗しました');
                 }
-                
-                return data;
             } catch (error) {
                 console.error(`${endpoint} データ取得エラー:`, error);
                 throw error;
@@ -953,78 +959,90 @@
                 const { groupByPort, selectedPorts, allPortsSelected } = getFilterConditions();
                 console.log('フィルター条件:', { groupByPort, selectedPorts, allPortsSelected });
                 
-                // データ取得
-                const result = await fetchDataWithFilters('get_remote_ip_stats.php', { 
-                    group_by_port: groupByPort,
-                    filter_port: allPortsSelected ? 'all' : selectedPorts.join(',')
-                });
+                // タイムアウト付きでデータ取得
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
                 
-                // ローディング表示を削除
-                clearLoading(chartContainer);
-                
-                if (!result.success) {
-                    throw new Error(result.error || 'データ取得エラー');
-                }
-                
-                const data = result.data;
-                
-                // 既存のチャートを破棄
-                if (window.remoteIpChart instanceof Chart) {
-                    window.remoteIpChart.destroy();
-                    window.remoteIpChart = null;
-                }
-                
-                // データが空の場合の処理
-                if (!data || data.length === 0) {
-                    showNoDataMessage(chartContainer);
-                    return;
-                }
-                
-                // キャンバスを表示
-                canvasElement.style.display = 'block';
-                
-                // ラベルとデータセットの準備
-                const { labels, datasets } = prepareChartData(data, groupByPort);
-                
-                // グラフの描画
-                const ctx = canvasElement.getContext('2d');
-                window.remoteIpChart = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: datasets
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        indexAxis: 'y',
-                        scales: {
-                            x: {
-                                beginAtZero: true,
-                                stacked: true
-                            },
-                            y: {
-                                stacked: true
-                            }
+                try {
+                    const result = await fetchDataWithFilters('get_remote_ip_stats.php', { 
+                        group_by_port: groupByPort,
+                        filter_port: allPortsSelected ? 'all' : selectedPorts.join(',')
+                    }, controller.signal);
+                    
+                    clearTimeout(timeoutId);
+                    
+                    // ローディング表示を削除
+                    clearLoading(chartContainer);
+                    
+                    if (!result.success) {
+                        throw new Error(result.error || 'データ取得エラー');
+                    }
+                    
+                    const data = result.data;
+                    
+                    // 既存のチャートを破棄
+                    if (window.remoteIpChart instanceof Chart) {
+                        window.remoteIpChart.destroy();
+                        window.remoteIpChart = null;
+                    }
+                    
+                    // データが空の場合の処理
+                    if (!data || data.length === 0) {
+                        showNoDataMessage(chartContainer);
+                        return;
+                    }
+                    
+                    // キャンバスを表示
+                    canvasElement.style.display = 'block';
+                    
+                    // ラベルとデータセットの準備
+                    const { labels, datasets } = prepareChartData(data, groupByPort);
+                    
+                    // グラフの描画
+                    const ctx = canvasElement.getContext('2d');
+                    window.remoteIpChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets: datasets
                         },
-                        plugins: {
-                            legend: {
-                                position: 'right'
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            indexAxis: 'y',
+                            scales: {
+                                x: {
+                                    beginAtZero: true,
+                                    stacked: true
+                                },
+                                y: {
+                                    stacked: true
+                                }
                             },
-                            tooltip: {
-                                callbacks: {
-                                    title: function(context) {
-                                        return groupByPort ? 
-                                            `IP: ${context[0].label}` : 
-                                            `IP: ${context[0].label}`;
+                            plugins: {
+                                legend: {
+                                    position: 'right'
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        title: function(context) {
+                                            return groupByPort ? 
+                                                `IP: ${context[0].label}` : 
+                                                `IP: ${context[0].label}`;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                });
-                
-                console.log('リモートIPグラフの描画が完了しました');
+                    });
+                    
+                    console.log('リモートIPグラフの描画が完了しました');
+                    
+                } catch (apiError) {
+                    console.error('API呼び出しエラー:', apiError);
+                    clearTimeout(timeoutId);
+                    showErrorMessage(chartContainer, apiError.message);
+                }
                 
             } catch (error) {
                 console.error('リモートIPグラフの描画でエラーが発生しました:', error);

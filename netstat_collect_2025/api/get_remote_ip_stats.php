@@ -66,7 +66,7 @@ try {
             $ports = explode(',', $filterPort);
             $placeholders = [];
             foreach ($ports as $i => $port) {
-                $paramName = ":filter_port{$i}";
+                $paramName = ":filter_port_$i";
                 $placeholders[] = $paramName;
                 $params[$paramName] = trim($port);
             }
