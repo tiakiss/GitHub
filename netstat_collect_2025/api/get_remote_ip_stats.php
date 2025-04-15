@@ -14,7 +14,7 @@ try {
     $serverName = isset($_GET['server_name']) ? $_GET['server_name'] : null;
     $groupByPort = isset($_GET['group_by_port']) ? filter_var($_GET['group_by_port'], FILTER_VALIDATE_BOOLEAN) : false;
     
-    // クエリの基本部分 - 新しいgroup_by_portパラメータに基づいてSELECT句とGROUP BY句を変更
+    // クエリの基本部分
     if ($groupByPort) {
         $sql = "
             SELECT 
@@ -57,7 +57,7 @@ try {
         $params[':server_name'] = $serverName;
     }
     
-    // グループ化と並べ替え - group_by_portパラメータに基づいてGROUP BY句を変更
+    // グループ化と並べ替え
     if ($groupByPort) {
         $sql .= " GROUP BY remote_ip, port, servername ORDER BY COUNT(*) DESC";
     } else {
@@ -69,57 +69,105 @@ try {
     $stmt->execute($params);
     $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // トップエントリを特定する
+    // データ処理
     if ($groupByPort) {
-        // リモートIP+ポートの組み合わせでカウント
+        // IP+ポートの組み合わせでカウント
         $ipPortCounts = [];
+        $detailedData = [];
         
         foreach ($results as $row) {
+            // ラベル作成: IP:PORT形式
             $key = $row['remote_ip'] . ':' . $row['port'];
+            
+            // 全体カウント集計
             if (!isset($ipPortCounts[$key])) {
                 $ipPortCounts[$key] = 0;
+                $detailedData[$key] = [
+                    'remote_ip' => $row['remote_ip'],
+                    'port' => $row['port'],
+                    'servers' => []
+                ];
             }
-            $ipPortCounts[$key] += $row['count'];
+            $ipPortCounts[$key] += intval($row['count']);
+            
+            // サーバー別集計データ保持
+            $detailedData[$key]['servers'][] = [
+                'servername' => $row['servername'],
+                'count' => intval($row['count'])
+            ];
         }
         
-        // 接続数の降順でソート
+        // カウント降順ソート
         arsort($ipPortCounts);
         
-        // トップ20のリモートIP+ポートを取得
+        // トップ20エントリ取得
         $topEntries = array_slice(array_keys($ipPortCounts), 0, 20);
         
-        // 結果をトップエントリのみに絞り込む
-        $filteredResults = array_filter($results, function($row) use ($topEntries) {
-            $key = $row['remote_ip'] . ':' . $row['port'];
-            return in_array($key, $topEntries);
-        });
+        // 最終データセット作成
+        $filteredResults = [];
+        foreach ($topEntries as $entry) {
+            $parts = explode(':', $entry);
+            $ip = $parts[0];
+            $port = $parts[1];
+            
+            // サーバーごとのデータを追加
+            foreach ($detailedData[$entry]['servers'] as $serverData) {
+                $filteredResults[] = [
+                    'remote_ip' => $ip,
+                    'port' => $port,
+                    'servername' => $serverData['servername'],
+                    'count' => $serverData['count'],
+                    'label' => $entry  // 明示的にIP:PORTラベルを追加
+                ];
+            }
+        }
     } else {
-        // 従来通りリモートIPのみでカウント
+        // IPごとに集計
         $ipCounts = [];
+        $detailedData = [];
         
         foreach ($results as $row) {
+            // 全体カウント集計
             if (!isset($ipCounts[$row['remote_ip']])) {
                 $ipCounts[$row['remote_ip']] = 0;
+                $detailedData[$row['remote_ip']] = [
+                    'servers' => []
+                ];
             }
-            $ipCounts[$row['remote_ip']] += $row['count'];
+            $ipCounts[$row['remote_ip']] += intval($row['count']);
+            
+            // サーバー別集計データ保持
+            $detailedData[$row['remote_ip']]['servers'][] = [
+                'servername' => $row['servername'],
+                'count' => intval($row['count'])
+            ];
         }
         
-        // リモートIPを接続数の降順でソート
+        // カウント降順ソート
         arsort($ipCounts);
         
-        // トップ20のリモートIPを取得
+        // トップ20のIPを取得
         $topIps = array_slice(array_keys($ipCounts), 0, 20);
         
-        // 結果をトップIPのみに絞り込む
-        $filteredResults = array_filter($results, function($row) use ($topIps) {
-            return in_array($row['remote_ip'], $topIps);
-        });
+        // 最終データセット作成
+        $filteredResults = [];
+        foreach ($topIps as $ip) {
+            // サーバーごとのデータを追加
+            foreach ($detailedData[$ip]['servers'] as $serverData) {
+                $filteredResults[] = [
+                    'remote_ip' => $ip,
+                    'servername' => $serverData['servername'],
+                    'count' => $serverData['count'],
+                    'label' => $ip  // 明示的にIPラベルを追加
+                ];
+            }
+        }
     }
     
     // JSONで結果を返す
     echo json_encode([
         'success' => true,
-        'data' => array_values($filteredResults), // インデックスをリセット
+        'data' => $filteredResults,
         'top_entries' => $groupByPort ? $topEntries : $topIps,
         'group_by_port' => $groupByPort,
         'filters' => [

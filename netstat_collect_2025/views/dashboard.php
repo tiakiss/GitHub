@@ -711,7 +711,7 @@
                 // Canvasを再表示
                 canvasElement.style.display = 'block';
 
-                // フィルター付きでデータを取得 (group_by_portパラメータを追加)
+                // フィルター付きでデータを取得
                 const result = await fetchDataWithFilters('get_remote_ip_stats.php', { 
                     group_by_port: groupByPort 
                 });
@@ -750,40 +750,34 @@
                 // --- データがある場合の処理 ---
                 canvasElement.style.display = 'block';
 
-                // リモートIP別・サーバー別にデータを整理 (ポートを含むかどうかで処理を分岐)
-                const topEntries = result.top_entries || [];
-                
-                // トップエントリがない場合は、データから抽出
-                if (topEntries.length === 0) {
-                    if (groupByPort) {
-                        // ポート別表示の場合
-                        const ipPortCounts = {};
-                        data.forEach(item => {
-                            const key = `${item.remote_ip}:${item.port}`;
-                            if (!ipPortCounts[key]) {
-                                ipPortCounts[key] = 0;
-                            }
-                            ipPortCounts[key] += parseInt(item.count);
-                        });
-                        // 降順にソートして上位10件を取得（表示数制限）
-                        const sortedEntries = Object.keys(ipPortCounts).sort((a, b) => ipPortCounts[b] - ipPortCounts[a]);
-                        topEntries.push(...sortedEntries.slice(0, 10));
-                    } else {
-                        // IP単位表示の場合（既存の処理）
-                        const ipCounts = {};
-                        data.forEach(item => {
-                            if (!ipCounts[item.remote_ip]) {
-                                ipCounts[item.remote_ip] = 0;
-                            }
-                            ipCounts[item.remote_ip] += parseInt(item.count);
-                        });
-                        // 降順にソートして上位10件を取得（表示数制限）
-                        const sortedIps = Object.keys(ipCounts).sort((a, b) => ipCounts[b] - ipCounts[a]);
-                        topEntries.push(...sortedIps.slice(0, 10));
-                    }
+                // トップエントリとラベルの取得
+                let labels = [];
+                if (result.top_entries && result.top_entries.length > 0) {
+                    labels = result.top_entries;
                 } else {
-                    // 表示数を制限（多すぎるとグラフが見づらくなるため）
-                    topEntries.splice(10);
+                    // APIレスポンスにラベルがある場合はそれを使用
+                    if (data[0].label) {
+                        const labelSet = new Set();
+                        data.forEach(item => labelSet.add(item.label));
+                        labels = Array.from(labelSet);
+                    } else {
+                        // それ以外の場合は古い方式で作成（互換性のため）
+                        if (groupByPort) {
+                            const ipPortSet = new Set();
+                            data.forEach(item => {
+                                const label = `${item.remote_ip}:${item.port}`;
+                                ipPortSet.add(label);
+                            });
+                            labels = Array.from(ipPortSet);
+                        } else {
+                            const ipSet = new Set();
+                            data.forEach(item => ipSet.add(item.remote_ip));
+                            labels = Array.from(ipSet);
+                        }
+                    }
+                    
+                    // 最大10件に制限
+                    labels = labels.slice(0, 10);
                 }
 
                 // サーバー一覧を取得
@@ -793,25 +787,42 @@
                 const datasets = servers.map((server, index) => {
                     const serverColor = getServerColors(index);
                     
-                    // 各エントリのこのサーバーでの接続数を取得
-                    const serverData = topEntries.map(entry => {
+                    // 各ラベルのこのサーバーでの接続数を取得
+                    const serverData = labels.map(label => {
+                        let matches;
                         if (groupByPort) {
-                            // IP:ポートの形式からIPとポートを分離
-                            const [ip, port] = entry.split(':');
-                            const match = data.find(item => 
-                                item.remote_ip === ip && 
-                                item.port === port && 
-                                item.servername === server
-                            );
-                            return match ? parseInt(match.count) : 0;
+                            if (label.includes(':')) {
+                                // ラベルが既にIP:PORT形式の場合
+                                const [ip, port] = label.split(':');
+                                matches = data.filter(item => 
+                                    item.remote_ip === ip && 
+                                    item.port === port && 
+                                    item.servername === server
+                                );
+                            } else {
+                                // データにlabelプロパティがある場合
+                                matches = data.filter(item => 
+                                    item.label === label && 
+                                    item.servername === server
+                                );
+                            }
                         } else {
-                            // 従来通りIPのみで検索
-                            const match = data.find(item => 
-                                item.remote_ip === entry && 
-                                item.servername === server
-                            );
-                            return match ? parseInt(match.count) : 0;
+                            // IPのみの表示の場合
+                            if (data[0].label) {
+                                matches = data.filter(item => 
+                                    item.label === label && 
+                                    item.servername === server
+                                );
+                            } else {
+                                matches = data.filter(item => 
+                                    item.remote_ip === label && 
+                                    item.servername === server
+                                );
+                            }
                         }
+                        
+                        // マッチしたすべての項目の合計を計算
+                        return matches.reduce((sum, item) => sum + parseInt(item.count), 0);
                     });
                     
                     return {
@@ -829,7 +840,7 @@
                 window.remoteIpChart = new Chart(ctx, {
                     type: 'bar',
                     data: {
-                        labels: topEntries,
+                        labels: labels,
                         datasets: datasets
                     },
                     options: {
@@ -849,11 +860,12 @@
                             tooltip: {
                                 callbacks: {
                                     title: function(context) {
-                                        if (groupByPort) {
-                                            const [ip, port] = context[0].label.split(':');
+                                        const label = context[0].label;
+                                        if (groupByPort && label.includes(':')) {
+                                            const [ip, port] = label.split(':');
                                             return `IP: ${ip}, ポート: ${port}`;
                                         } else {
-                                            return `IP: ${context[0].label}`;
+                                            return `IP: ${label}`;
                                         }
                                     }
                                 }
