@@ -13,6 +13,7 @@ try {
     $toDate = isset($_GET['to_date']) ? $_GET['to_date'] : null;
     $serverName = isset($_GET['server_name']) ? $_GET['server_name'] : null;
     $groupByPort = isset($_GET['group_by_port']) ? filter_var($_GET['group_by_port'], FILTER_VALIDATE_BOOLEAN) : false;
+    $filterPort = isset($_GET['filter_port']) ? $_GET['filter_port'] : null; // 新しいフィルターパラメータ
     
     // クエリの基本部分
     if ($groupByPort) {
@@ -30,6 +31,7 @@ try {
         $sql = "
             SELECT 
                 remote_ip,
+                port,  /* ポートも常に取得しておく */
                 servername, 
                 COUNT(*) as count 
             FROM 
@@ -57,11 +59,17 @@ try {
         $params[':server_name'] = $serverName;
     }
     
+    // ポートフィルター（新規追加）
+    if ($filterPort && $filterPort !== 'all') {
+        $sql .= " AND port = :filter_port";
+        $params[':filter_port'] = $filterPort;
+    }
+    
     // グループ化と並べ替え
     if ($groupByPort) {
         $sql .= " GROUP BY remote_ip, port, servername ORDER BY COUNT(*) DESC";
     } else {
-        $sql .= " GROUP BY remote_ip, servername ORDER BY COUNT(*) DESC";
+        $sql .= " GROUP BY remote_ip, port, servername ORDER BY COUNT(*) DESC";
     }
     
     // クエリの準備と実行
@@ -122,7 +130,7 @@ try {
             }
         }
     } else {
-        // IPごとに集計
+        // IPごとに集計（特定ポートでフィルタリングされている可能性あり）
         $ipCounts = [];
         $detailedData = [];
         
@@ -139,7 +147,8 @@ try {
             // サーバー別集計データ保持
             $detailedData[$row['remote_ip']]['servers'][] = [
                 'servername' => $row['servername'],
-                'count' => intval($row['count'])
+                'count' => intval($row['count']),
+                'port' => $row['port']  // ポート情報も保持
             ];
         }
         
@@ -158,11 +167,17 @@ try {
                     'remote_ip' => $ip,
                     'servername' => $serverData['servername'],
                     'count' => $serverData['count'],
+                    'port' => $serverData['port'],  // ポート情報も含める
                     'label' => $ip  // 明示的にIPラベルを追加
                 ];
             }
         }
     }
+    
+    // 利用可能なポート一覧を取得（ポートセレクター用）
+    $portSql = "SELECT DISTINCT port FROM netstat_date ORDER BY port";
+    $portStmt = $pdo->query($portSql);
+    $availablePorts = $portStmt->fetchAll(PDO::FETCH_COLUMN);
     
     // JSONで結果を返す
     echo json_encode([
@@ -170,11 +185,14 @@ try {
         'data' => $filteredResults,
         'top_entries' => $groupByPort ? $topEntries : $topIps,
         'group_by_port' => $groupByPort,
+        'available_ports' => $availablePorts,
+        'filter_port' => $filterPort,
         'filters' => [
             'from_date' => $fromDate,
             'to_date' => $toDate,
             'server_name' => $serverName,
-            'group_by_port' => $groupByPort
+            'group_by_port' => $groupByPort,
+            'filter_port' => $filterPort
         ]
     ]);
     
