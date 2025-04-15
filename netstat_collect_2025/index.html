@@ -1,0 +1,56 @@
+<script>
+// ポートフィルターパネルの表示/非表示切り替え
+function togglePortFilterPanel() {
+    const panel = document.getElementById('port-filter-panel');
+    const arrowIcon = document.querySelector('#port-filter-toggle .arrow-icon');
+    
+    if (panel.style.display === 'block') {
+        panel.style.display = 'none';
+        arrowIcon.textContent = '▼';
+    } else {
+        panel.style.display = 'block';
+        arrowIcon.textContent = '▲';
+    }
+}
+
+// ポートチェックボックスの状態変更処理
+function handlePortCheckboxChange() {
+    const allCheckbox = document.getElementById('port-all');
+    const portCheckboxes = document.querySelectorAll('.port-checkbox');
+    
+    // 「すべて」チェックボックスの状態に応じて個別のチェックボックスを制御
+    portCheckboxes.forEach(checkbox => {
+        checkbox.checked = allCheckbox.checked;
+    });
+}
+
+// ポートフィルターボタンのイベントハンドラー
+document.getElementById('port-filter-toggle').addEventListener('click', togglePortFilterPanel);
+
+// 「すべて」チェックボックスのイベントハンドラー
+document.getElementById('port-all').addEventListener('change', handlePortCheckboxChange);
+
+// ポートフィルター適用ボタンのイベントハンドラー
+document.getElementById('apply-port-filter').addEventListener('click', function() {
+    // パネルを閉じる
+    document.getElementById('port-filter-panel').style.display = 'none';
+    document.querySelector('#port-filter-toggle .arrow-icon').textContent = '▼';
+    
+    // リモートIPグラフを再読み込み
+    loadRemoteIpChart();
+});
+
+// クリックイベントをドキュメント全体に追加（パネル外クリックで閉じる）
+document.addEventListener('click', function(event) {
+    const panel = document.getElementById('port-filter-panel');
+    const button = document.getElementById('port-filter-toggle');
+    
+    // パネルとボタン以外がクリックされた場合にパネルを閉じる
+    if (panel.style.display === 'block' && 
+        !panel.contains(event.target) && 
+        !button.contains(event.target)) {
+        panel.style.display = 'none';
+        document.querySelector('#port-filter-toggle .arrow-icon').textContent = '▼';
+    }
+});
+</script> 

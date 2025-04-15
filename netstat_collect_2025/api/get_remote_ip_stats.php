@@ -59,10 +59,23 @@ try {
         $params[':server_name'] = $serverName;
     }
     
-    // ポートフィルター（新規追加）
+    // ポートフィルター（複数ポート対応）
     if ($filterPort && $filterPort !== 'all') {
-        $sql .= " AND port = :filter_port";
-        $params[':filter_port'] = $filterPort;
+        // カンマ区切りのポートリストをチェック
+        if (strpos($filterPort, ',') !== false) {
+            $ports = explode(',', $filterPort);
+            $placeholders = [];
+            foreach ($ports as $i => $port) {
+                $paramName = ":filter_port{$i}";
+                $placeholders[] = $paramName;
+                $params[$paramName] = trim($port);
+            }
+            $sql .= " AND port IN (" . implode(', ', $placeholders) . ")";
+        } else {
+            // 単一ポートの場合（既存の処理）
+            $sql .= " AND port = :filter_port";
+            $params[':filter_port'] = $filterPort;
+        }
     }
     
     // グループ化と並べ替え

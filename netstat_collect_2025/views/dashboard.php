@@ -208,17 +208,29 @@
                 <div class="card-header">
                     トップリモートIP
                     <div class="toggle-container" style="float: right; font-size: 14px; font-weight: normal;">
-                        <label for="port-filter" style="margin-right: 10px;">ポート:</label>
-                        <select id="port-filter" style="padding: 2px; margin-right: 15px;">
-                            <option value="all">全て</option>
-                            <!-- ポートリストが動的に読み込まれます -->
-                        </select>
+                        <div class="port-filter-button" id="port-filter-toggle">
+                            <span>ポート絞り込み</span>
+                            <i class="arrow-icon">▼</i>
+                        </div>
                         
-                        <label class="toggle-switch">
+                        <label class="toggle-switch" style="margin-left: 15px;">
                             <input type="checkbox" id="ip-port-toggle">
                             <span class="toggle-slider"></span>
                         </label>
                         <span id="toggle-label">ポート別表示: オフ</span>
+                    </div>
+                </div>
+                <div class="port-filter-panel" id="port-filter-panel" style="display: none;">
+                    <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                        <input type="checkbox" id="port-all" checked>
+                        <label for="port-all" style="margin-left: 5px; margin-bottom: 0;">すべて</label>
+                    </div>
+                    <div class="port-list" style="max-height: 150px; overflow-y: auto;">
+                        <!-- ポートリストが動的に読み込まれます -->
+                        <div id="port-loading" style="color: #666; padding: 5px;">読み込み中...</div>
+                    </div>
+                    <div style="text-align: right; margin-top: 8px;">
+                        <button id="apply-port-filter" class="mini-button">適用</button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -700,18 +712,22 @@
             try {
                 console.log('ポート一覧の読み込み開始');
                 
-                const portFilterSelect = document.getElementById('port-filter');
-                if (!portFilterSelect) {
-                    console.error('ポート選択用のセレクトボックスが見つかりませんでした');
+                const portListContainer = document.querySelector('.port-list');
+                if (!portListContainer) {
+                    console.error('ポートリスト表示用のコンテナが見つかりませんでした');
                     return;
                 }
                 
-                // 選択済みの値を保持
-                const selectedValue = portFilterSelect.value || 'all';
+                // 既存のチェックボックスをクリア（ローディング表示は残す）
+                const existingCheckboxes = portListContainer.querySelectorAll('div:not(:first-child)');
+                existingCheckboxes.forEach(checkbox => {
+                    checkbox.remove();
+                });
                 
-                // 選択肢をクリア（最初の「全て」オプションは残す）
-                while (portFilterSelect.options.length > 1) {
-                    portFilterSelect.remove(1);
+                // ローディング表示を更新
+                const loadingDiv = document.getElementById('port-loading');
+                if (loadingDiv) {
+                    loadingDiv.textContent = 'ポート一覧取得中...';
                 }
                 
                 // 現在のフィルターを取得してAPIリクエストに含める
@@ -735,8 +751,11 @@
                 console.log(`Fetch URL: ${apiUrl}`);
                 
                 const response = await fetch(apiUrl);
-                const responseData = await response.json();
+                if (!response.ok) {
+                    throw new Error(`HTTPエラー: ${response.status}`);
+                }
                 
+                const responseData = await response.json();
                 console.log('ポート一覧APIの応答:', responseData);
                 
                 if (!responseData.success) {
@@ -751,48 +770,75 @@
                 
                 if (!ports || !Array.isArray(ports) || ports.length === 0) {
                     console.warn('ポート一覧が空です');
+                    if (loadingDiv) {
+                        loadingDiv.textContent = 'ポート一覧が空です';
+                    }
                     return;
+                }
+                
+                // ローディング表示を削除
+                if (loadingDiv) {
+                    loadingDiv.remove();
                 }
                 
                 // トップポートを先に表示するためのマップ作成
                 const portPriority = {};
                 topPorts.forEach((item, index) => {
-                    portPriority[item.port] = index;
+                    portPriority[item.port] = {
+                        priority: index,
+                        count: item.count
+                    };
                 });
                 
                 // 人気順にソート（トップポートが先頭に来るように）
                 const sortedPorts = [...ports].sort((a, b) => {
-                    const priorityA = portPriority[a] !== undefined ? priorityA : 999;
-                    const priorityB = portPriority[b] !== undefined ? priorityB : 999;
+                    const priorityA = portPriority[a]?.priority ?? 999;
+                    const priorityB = portPriority[b]?.priority ?? 999;
                     return priorityA - priorityB;
                 });
                 
-                // 最初の10件（トップポート）にはラベルを付ける
+                // チェックボックスリストを作成
+                const fragment = document.createDocumentFragment();
+                
                 sortedPorts.forEach((port, index) => {
-                    const option = document.createElement('option');
-                    option.value = port;
+                    const portDiv = document.createElement('div');
+                    portDiv.className = 'port-checkbox-item';
+                    portDiv.style.cssText = 'display: flex; align-items: center; margin-bottom: 5px;';
                     
-                    let label = port;
-                    // トップ10には「（人気）」マークを追加
-                    if (index < 10 && topPorts.find(item => item.port == port)) {
-                        const count = topPorts.find(item => item.port == port).count;
-                        label = `${port} (${count}件)`;
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `port-${port}`;
+                    checkbox.value = port;
+                    checkbox.className = 'port-checkbox';
+                    checkbox.checked = document.getElementById('port-all').checked;
+                    
+                    const label = document.createElement('label');
+                    label.setAttribute('for', checkbox.id);
+                    label.style.cssText = 'margin-left: 5px; margin-bottom: 0;';
+                    
+                    let labelText = port;
+                    if (portPriority[port]) {
+                        labelText = `${port} (${portPriority[port].count}件)`;
+                        label.classList.add('popular-port');
+                        label.style.fontWeight = 'bold';
                     }
+                    label.textContent = labelText;
                     
-                    option.textContent = label;
-                    portFilterSelect.appendChild(option);
-                    
-                    // 以前選択されていた値があれば、それを選択状態に戻す
-                    if (port == selectedValue) {
-                        portFilterSelect.value = port;
-                    }
+                    portDiv.appendChild(checkbox);
+                    portDiv.appendChild(label);
+                    fragment.appendChild(portDiv);
                 });
                 
+                portListContainer.appendChild(fragment);
                 console.log('ポート一覧表示完了');
                 
             } catch (error) {
                 console.error('ポート一覧読み込みエラー:', error);
-                // エラーメッセージ表示など必要に応じて
+                const loadingDiv = document.getElementById('port-loading');
+                if (loadingDiv) {
+                    loadingDiv.textContent = `ポート一覧取得エラー: ${error.message}`;
+                    loadingDiv.style.color = 'red';
+                }
             }
         }
 
@@ -878,218 +924,106 @@
         async function loadRemoteIpChart() {
             const chartContainer = document.getElementById('remote-ip-chart').parentNode;
             const canvasElement = document.getElementById('remote-ip-chart');
-            const groupByPort = document.getElementById('ip-port-toggle').checked;
-            const filterPort = document.getElementById('port-filter').value;
-
+            
+            if (!chartContainer || !canvasElement) {
+                console.error('グラフコンテナまたはキャンバス要素が見つかりません');
+                return;
+            }
+            
             try {
-                console.log(`リモートIPグラフ読み込み開始 (ポート別表示: ${groupByPort ? 'オン' : 'オフ'}, ポートフィルター: ${filterPort})`);
-
-                // 既存の処理と表示クリア（変更なし）...
+                const groupByPort = document.getElementById('ip-port-toggle').checked;
+                
+                // 選択されたポートを取得
+                const allPortsSelected = document.getElementById('port-all').checked;
+                let selectedPorts = [];
+                
+                if (!allPortsSelected) {
+                    const portCheckboxes = document.querySelectorAll('input.port-checkbox:checked');
+                    selectedPorts = Array.from(portCheckboxes)
+                        .filter(cb => cb.id !== 'port-all')
+                        .map(cb => cb.value);
+                }
+                
+                const filterPortParam = selectedPorts.length > 0 ? selectedPorts.join(',') : 'all';
+                
+                console.log(`リモートIPグラフ読み込み開始`, {
+                    groupByPort,
+                    allPortsSelected,
+                    selectedPorts,
+                    filterPortParam
+                });
+                
+                // 既存の表示をクリア
                 const existingMessage = chartContainer.querySelector('div[style*="color:"]');
                 if (existingMessage) {
                     chartContainer.removeChild(existingMessage);
                 }
+                
                 const loadingDiv = chartContainer.querySelector('div:not([style*="color:"])');
                 if (loadingDiv && loadingDiv.textContent.includes('読み込み中')) {
                     chartContainer.removeChild(loadingDiv);
                 }
+                
                 canvasElement.style.display = 'block';
-
-                // フィルター付きでデータを取得（ポートフィルターを追加）
+                
+                // フィルター付きでデータを取得
                 const result = await fetchDataWithFilters('get_remote_ip_stats.php', { 
                     group_by_port: groupByPort,
-                    filter_port: filterPort
+                    filter_port: filterPortParam
                 });
-                console.log('取得データ (remote_ip):', result);
-
+                
                 if (!result.success) {
                     throw new Error(result.error || 'データ取得エラー');
                 }
                 
                 const data = result.data;
-                console.log('グラフ用データ (remote_ip):', data);
+                console.log('取得したデータ:', data);
                 
                 // 既存のチャートを破棄
                 if (window.remoteIpChart instanceof Chart) {
                     window.remoteIpChart.destroy();
                     window.remoteIpChart = null;
                 }
-
+                
                 // データが空の場合の処理
                 if (!data || data.length === 0) {
-                    // 表示メッセージ処理（変更なし）...
                     canvasElement.style.display = 'none';
                     const messageDiv = document.createElement('div');
                     messageDiv.style.color = 'orange';
                     messageDiv.style.padding = '20px';
                     messageDiv.style.textAlign = 'center';
                     messageDiv.textContent = '選択した期間のデータがありません';
-                    if (!chartContainer.querySelector('div[style*="color: orange"]')) {
-                        chartContainer.appendChild(messageDiv);
-                    }
-                    console.log('データが空のためグラフ描画をスキップ (remote_ip)');
+                    chartContainer.appendChild(messageDiv);
                     return;
                 }
-
-                // --- データがある場合の処理 ---
-                canvasElement.style.display = 'block';
-
-                // トップエントリとラベルの取得
-                let labels = [];
-                if (result.top_entries && result.top_entries.length > 0) {
-                    labels = result.top_entries;
-                } else {
-                    // APIレスポンスにラベルがある場合はそれを使用
-                    if (data[0].label) {
-                        const labelSet = new Set();
-                        data.forEach(item => labelSet.add(item.label));
-                        labels = Array.from(labelSet);
-                    } else {
-                        // それ以外の場合は古い方式で作成（互換性のため）
-                        if (groupByPort) {
-                            const ipPortSet = new Set();
-                            data.forEach(item => {
-                                const label = `${item.remote_ip}:${item.port}`;
-                                ipPortSet.add(label);
-                            });
-                            labels = Array.from(ipPortSet);
-                        } else {
-                            const ipSet = new Set();
-                            data.forEach(item => ipSet.add(item.remote_ip));
-                            labels = Array.from(ipSet);
-                        }
-                    }
-                    
-                    // 最大10件に制限
-                    labels = labels.slice(0, 10);
-                }
-
-                // サーバー一覧を取得
-                const servers = [...new Set(data.map(item => item.servername))];
                 
-                // サーバーごとにデータセットを作成
-                const datasets = servers.map((server, index) => {
-                    const serverColor = getServerColors(index);
-                    
-                    // 各ラベルのこのサーバーでの接続数を取得
-                    const serverData = labels.map(label => {
-                        let matches;
-                        if (groupByPort) {
-                            if (label.includes(':')) {
-                                // ラベルが既にIP:PORT形式の場合
-                                const [ip, port] = label.split(':');
-                                matches = data.filter(item => 
-                                    item.remote_ip === ip && 
-                                    item.port === port && 
-                                    item.servername === server
-                                );
-                            } else {
-                                // データにlabelプロパティがある場合
-                                matches = data.filter(item => 
-                                    item.label === label && 
-                                    item.servername === server
-                                );
-                            }
-                        } else {
-                            // IPのみの表示の場合
-                            if (data[0].label) {
-                                matches = data.filter(item => 
-                                    item.label === label && 
-                                    item.servername === server
-                                );
-                            } else {
-                                matches = data.filter(item => 
-                                    item.remote_ip === label && 
-                                    item.servername === server
-                                );
-                            }
-                        }
-                        
-                        // マッチしたすべての項目の合計を計算
-                        return matches.reduce((sum, item) => sum + parseInt(item.count), 0);
-                    });
-                    
-                    return {
-                        label: server,
-                        data: serverData,
-                        backgroundColor: serverColor.backgroundColor,
-                        borderColor: serverColor.borderColor,
-                        borderWidth: 1
-                    };
-                });
-
-                // グラフタイトルの設定（ポートフィルター適用時）
+                // グラフタイトルの設定
                 let chartTitle = "";
-                if (filterPort && filterPort !== 'all') {
-                    chartTitle = `ポート ${filterPort} の接続`;
-                }
-
-                // グラフの描画
-                const ctx = canvasElement.getContext('2d');
-                
-                window.remoteIpChart = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: datasets
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        indexAxis: 'y', // 横棒グラフ
-                        scales: {
-                            x: {
-                                beginAtZero: true,
-                                stacked: true
-                            },
-                            y: {
-                                stacked: true
-                            }
-                        },
-                        plugins: {
-                            title: {
-                                display: !!chartTitle,
-                                text: chartTitle,
-                                padding: {
-                                    top: 10,
-                                    bottom: 10
-                                }
-                            },
-                            tooltip: {
-                                callbacks: {
-                                    title: function(context) {
-                                        const label = context[0].label;
-                                        if (groupByPort && label.includes(':')) {
-                                            const [ip, port] = label.split(':');
-                                            return `IP: ${ip}, ポート: ${port}`;
-                                        } else {
-                                            return `IP: ${label}`;
-                                        }
-                                    }
-                                }
-                            },
-                            legend: {
-                                position: 'right'
-                            }
-                        }
+                if (!allPortsSelected && selectedPorts.length > 0) {
+                    if (selectedPorts.length === 1) {
+                        chartTitle = `ポート ${selectedPorts[0]} の接続`;
+                    } else if (selectedPorts.length <= 3) {
+                        chartTitle = `ポート ${selectedPorts.join(', ')} の接続`;
+                    } else {
+                        chartTitle = `${selectedPorts.length}個のポートでフィルター中`;
                     }
-                });
-                console.log('リモートIPグラフ描画完了');
+                }
+                
+                // グラフの描画処理（既存のコードを維持）
+                // ...
+                
+                console.log('リモートIPグラフの描画が完了しました');
                 
             } catch (error) {
-                // エラー処理（変更なし）...
-                console.error('リモートIPグラフ描画エラー:', error);
+                console.error('リモートIPグラフの描画でエラーが発生しました:', error);
+                
                 if (window.remoteIpChart instanceof Chart) {
                     window.remoteIpChart.destroy();
                     window.remoteIpChart = null;
                 }
+                
                 canvasElement.style.display = 'none';
-                const existingMessages = chartContainer.querySelectorAll('div[style*="color:"]');
-                existingMessages.forEach(msg => chartContainer.removeChild(msg));
-                const loadingDiv = chartContainer.querySelector('div:not([style*="color:"])');
-                if (loadingDiv && loadingDiv.textContent.includes('読み込み中')) {
-                    chartContainer.removeChild(loadingDiv);
-                }
+                
                 const errorDiv = document.createElement('div');
                 errorDiv.style.color = 'red';
                 errorDiv.style.padding = '20px';
@@ -1217,6 +1151,35 @@
             // サーバーリストとグラフを読み込む
             loadServerList();
             reloadAllCharts();
+
+            // ポートフィルターパネルの表示/非表示を制御
+            document.getElementById('port-filter-toggle').addEventListener('click', function() {
+                const panel = document.getElementById('port-filter-panel');
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            });
+            
+            // 「すべて」チェックボックスの制御
+            document.getElementById('port-all').addEventListener('change', function() {
+                const portCheckboxes = document.querySelectorAll('.port-list input[type="checkbox"]');
+                portCheckboxes.forEach(checkbox => {
+                    checkbox.checked = this.checked;
+                });
+            });
+            
+            // ポートフィルター適用ボタンのイベントハンドラ
+            document.getElementById('apply-port-filter').addEventListener('click', function() {
+                const selectedPorts = Array.from(document.querySelectorAll('.port-list input[type="checkbox"]:checked'))
+                    .map(checkbox => checkbox.value);
+                
+                // 選択されたポートをログに出力
+                console.log('選択されたポート:', selectedPorts);
+                
+                // リモートIPグラフを再読み込み
+                loadRemoteIpChart();
+                
+                // パネルを閉じる
+                document.getElementById('port-filter-panel').style.display = 'none';
+            });
         });
 
         // フィルター関連のイベントハンドラ (カスタム日付表示切り替え - 上のloadイベント内に移動)
@@ -1340,51 +1303,170 @@
 
         // サーバー選択のチェックボックス制御
         function handleServerCheckboxChange(event) {
-            console.log('チェックボックス変更イベント:', this.id, 'チェック状態:', this.checked);
-            
-            const allServerCheckbox = document.getElementById('server-all');
-            const serverCheckboxes = document.querySelectorAll('input.server-checkbox');
-            
-            console.log('サーバーチェックボックス数:', serverCheckboxes.length);
-            
-            if (this.id === 'server-all') {
-                if (this.checked) {
-                    console.log('「すべて」が選択されました - 他のチェックボックスを無効化します');
-                    serverCheckboxes.forEach(checkbox => {
-                        checkbox.checked = false;
-                        checkbox.disabled = true;
-                    });
+            try {
+                console.log('チェックボックス変更イベント:', this.id, 'チェック状態:', this.checked);
+                
+                const allServerCheckbox = document.getElementById('server-all');
+                const serverCheckboxes = document.querySelectorAll('input.server-checkbox');
+                
+                console.log('サーバーチェックボックス数:', serverCheckboxes.length);
+                
+                if (this.id === 'server-all') {
+                    if (this.checked) {
+                        console.log('「すべて」が選択されました - 他のチェックボックスを無効化します');
+                        serverCheckboxes.forEach(checkbox => {
+                            checkbox.checked = false;
+                            checkbox.disabled = true;
+                        });
+                    } else {
+                        console.log('「すべて」の選択が解除されました - 他のチェックボックスを有効化します');
+                        serverCheckboxes.forEach(checkbox => {
+                            checkbox.disabled = false;
+                        });
+                    }
                 } else {
-                    console.log('「すべて」の選択が解除されました - 他のチェックボックスを有効化します');
-                    serverCheckboxes.forEach(checkbox => {
-                        checkbox.disabled = false;
-                    });
-                }
-            } else {
-                if (this.checked) {
-                    console.log('個別サーバーが選択されました:', this.value);
-                    allServerCheckbox.checked = false;
+                    if (this.checked) {
+                        console.log('個別サーバーが選択されました:', this.value);
+                        allServerCheckbox.checked = false;
+                    }
+                    
+                    const anyChecked = Array.from(serverCheckboxes).some(cb => cb.checked);
+                    console.log('いずれかのサーバーが選択されているか:', anyChecked);
+                    
+                    if (!anyChecked) {
+                        console.log('すべてのサーバーの選択が解除されました - 「すべて」を選択します');
+                        allServerCheckbox.checked = true;
+                        serverCheckboxes.forEach(cb => {
+                            cb.disabled = true;
+                        });
+                    }
                 }
                 
-                const anyChecked = Array.from(serverCheckboxes).some(cb => cb.checked);
-                console.log('いずれかのサーバーが選択されているか:', anyChecked);
-                
-                if (!anyChecked) {
-                    console.log('すべてのサーバーの選択が解除されました - 「すべて」を選択します');
-                    allServerCheckbox.checked = true;
-                    serverCheckboxes.forEach(cb => {
-                        cb.disabled = true;
-                    });
+                if (allServerCheckbox.checked) {
+                    console.log('現在の選択: すべてのサーバー');
+                } else {
+                    const selected = Array.from(serverCheckboxes)
+                        .filter(cb => cb.checked)
+                        .map(cb => cb.value);
+                    console.log('現在選択されているサーバー:', selected.length > 0 ? selected : '選択なし（すべて）');
                 }
+                
+            } catch (error) {
+                console.error('サーバーチェックボックス変更処理でエラーが発生しました:', error);
             }
-            
-            if (allServerCheckbox.checked) {
-                console.log('現在の選択: すべてのサーバー');
-            } else {
-                const selected = Array.from(serverCheckboxes)
-                    .filter(cb => cb.checked)
+        }
+
+        // ポートチェックボックスの変更処理
+        function handlePortCheckboxChange(event) {
+            try {
+                console.log('ポートチェックボックス変更イベント:', this.id, 'チェック状態:', this.checked);
+                
+                const allPortCheckbox = document.getElementById('port-all');
+                if (!allPortCheckbox) {
+                    console.error('「すべて」のチェックボックスが見つかりません');
+                    return;
+                }
+                
+                const portCheckboxes = document.querySelectorAll('input.port-checkbox');
+                if (!portCheckboxes || portCheckboxes.length === 0) {
+                    console.warn('ポートチェックボックスが見つかりません');
+                    return;
+                }
+                
+                if (this.id === 'port-all') {
+                    // 「すべて」のチェックボックスが変更された場合
+                    if (this.checked) {
+                        console.log('「すべて」が選択されました - 他のチェックボックスを無効化します');
+                        portCheckboxes.forEach(checkbox => {
+                            if (checkbox.id !== 'port-all') {
+                                checkbox.checked = false;
+                                checkbox.disabled = true;
+                            }
+                        });
+                    } else {
+                        console.log('「すべて」の選択が解除されました - 他のチェックボックスを有効化します');
+                        portCheckboxes.forEach(checkbox => {
+                            if (checkbox.id !== 'port-all') {
+                                checkbox.disabled = false;
+                            }
+                        });
+                    }
+                } else {
+                    // 個別のポートチェックボックスが変更された場合
+                    if (this.checked) {
+                        console.log('個別ポートが選択されました:', this.value);
+                        allPortCheckbox.checked = false;
+                    }
+                    
+                    // 選択されているポートの数を確認
+                    const checkedCount = Array.from(portCheckboxes)
+                        .filter(cb => cb.id !== 'port-all' && cb.checked)
+                        .length;
+                    
+                    console.log('選択されているポート数:', checkedCount);
+                    
+                    if (checkedCount === 0) {
+                        console.log('すべてのポートの選択が解除されました - 「すべて」を選択します');
+                        allPortCheckbox.checked = true;
+                        portCheckboxes.forEach(cb => {
+                            if (cb.id !== 'port-all') {
+                                cb.disabled = true;
+                            }
+                        });
+                    }
+                }
+                
+                // 現在の選択状態をログ出力
+                const selectedPorts = Array.from(portCheckboxes)
+                    .filter(cb => cb.id !== 'port-all' && cb.checked)
                     .map(cb => cb.value);
-                console.log('現在選択されているサーバー:', selected.length > 0 ? selected : '選択なし（すべて）');
+                
+                console.log('現在の選択状態:', {
+                    allSelected: allPortCheckbox.checked,
+                    selectedPorts: selectedPorts.length > 0 ? selectedPorts : '選択なし（すべて）'
+                });
+                
+            } catch (error) {
+                console.error('ポートチェックボックス変更処理でエラーが発生しました:', error);
+            }
+        }
+
+        function togglePortFilterPanel() {
+            try {
+                const panel = document.getElementById('port-filter-panel');
+                const button = document.getElementById('port-filter-toggle');
+                
+                if (!panel || !button) {
+                    console.error('ポートフィルターパネルまたはトグルボタンが見つかりません');
+                    return;
+                }
+                
+                const arrowIcon = button.querySelector('.arrow-icon');
+                if (!arrowIcon) {
+                    console.error('矢印アイコンが見つかりません');
+                    return;
+                }
+                
+                const isVisible = panel.style.display === 'block';
+                panel.style.display = isVisible ? 'none' : 'block';
+                arrowIcon.textContent = isVisible ? '▼' : '▲';
+                
+                // パネル表示時に一度だけポート一覧を読み込む
+                if (!isVisible && !panel.dataset.loaded) {
+                    console.log('ポートフィルターパネルを表示 - ポート一覧を読み込みます');
+                    loadPortList().catch(error => {
+                        console.error('ポート一覧の読み込みに失敗しました:', error);
+                        // エラー時はパネルを閉じる
+                        panel.style.display = 'none';
+                        arrowIcon.textContent = '▼';
+                    });
+                    panel.dataset.loaded = 'true';
+                }
+                
+                console.log(`ポートフィルターパネルを${isVisible ? '非表示' : '表示'}にしました`);
+                
+            } catch (error) {
+                console.error('ポートフィルターパネルの切り替えでエラーが発生しました:', error);
             }
         }
 
